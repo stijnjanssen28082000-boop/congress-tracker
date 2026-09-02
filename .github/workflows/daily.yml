@@ -1,0 +1,73 @@
+name: Daily run
+
+on:
+  schedule:
+    # 06:00 UTC on weekdays ≈ 07:00 CET / 08:00 CEST — cron can't express CET
+    # with DST, so this drifts by an hour in summer. Adjust the "6" below
+    # seasonally if the exact wall-clock time matters.
+    - cron: "0 6 * * 1-5"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  run-daily:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      # data/tracker.db needs to persist across runs for incremental ingest,
+      # quality history and open paper positions. actions/cache's
+      # restore-keys fall back to the most recent previous entry matching
+      # the prefix; saving under a run-id-unique key means the save step
+      # always executes (a plain `actions/cache` skips saving on an exact
+      # key hit, which would otherwise never happen here).
+      - name: Restore database
+        uses: actions/cache/restore@v4
+        with:
+          path: data/tracker.db
+          key: tracker-db-${{ github.run_id }}
+          restore-keys: |
+            tracker-db-
+
+      - name: Run daily pipeline
+        env:
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: uv run python -m stock_tracker.run_daily
+
+      - name: Save database
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/tracker.db
+          key: tracker-db-${{ github.run_id }}
+
+      - name: Upload database as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tracker-db-${{ github.run_id }}
+          path: data/tracker.db
+          retention-days: 90
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ github.run_id }}
+          path: logs/
+          retention-days: 30

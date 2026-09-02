@@ -97,6 +97,7 @@ def _metrics(cagr, sharpe):
         longest_underwater_days=30,
         win_rate_pct=50.0,
         avg_holding_period_days=20.0,
+        avg_profit_per_trade_pct=3.0,
         num_trades=10,
         sharpe=sharpe,
         final_equity_eur=110_000.0,
@@ -201,6 +202,17 @@ def test_compute_metrics_flat_curve():
     assert m.sharpe == 0.0
 
 
+def test_compute_metrics_sharpe_bounded_for_near_zero_variance_curve():
+    # A perfectly smooth geometric growth curve has daily returns that are
+    # constant to within floating-point noise — std is near-zero but not
+    # exactly zero, which must not blow the Sharpe ratio up to something
+    # absurd (regression test for a bug the dashboard smoke test caught).
+    start = date(2020, 1, 1)
+    curve = [(start + timedelta(days=i), 100_000.0 * (1.001**i)) for i in range(500)]
+    m = backtest.compute_metrics(curve, [], 0.0, start, curve[-1][0])
+    assert abs(m.sharpe) < 100
+
+
 def test_compute_metrics_cagr_growth():
     start, end = date(2020, 1, 1), date(2021, 1, 1)
     curve = [(start, 100_000.0), (end, 200_000.0)]
@@ -233,6 +245,7 @@ def test_compute_metrics_win_rate_and_avg_holding_period():
             sector="S",
             entry_date=date(2024, 1, 1),
             entry_price=100,
+            exit_price=105,
             size_eur=1000,
             entry_cash_outlay=1000,
             exit_date=date(2024, 1, 11),
@@ -245,6 +258,7 @@ def test_compute_metrics_win_rate_and_avg_holding_period():
             sector="S",
             entry_date=date(2024, 1, 1),
             entry_price=100,
+            exit_price=90,
             size_eur=1000,
             entry_cash_outlay=1000,
             exit_date=date(2024, 1, 21),
@@ -257,6 +271,7 @@ def test_compute_metrics_win_rate_and_avg_holding_period():
     assert m.num_trades == 2
     assert m.win_rate_pct == pytest.approx(50.0)
     assert m.avg_holding_period_days == pytest.approx((10 + 20) / 2)
+    assert m.avg_profit_per_trade_pct == pytest.approx((5.0 + -10.0) / 2)
 
 
 def test_compute_metrics_empty_curve():
@@ -419,6 +434,8 @@ def test_store_and_list_runs(db):
         "out_of_sample_strategy",
         "out_of_sample_benchmark",
     }
+    stored_curve = backtest.load_equity_curve(runs[0]["metrics"]["in_sample_strategy"])
+    assert stored_curve == [(date(2020, 1, 1), 100_000.0), (date(2020, 12, 31), 120_000.0)]
 
 
 # --- run() orchestration ------------------------------------------------------------

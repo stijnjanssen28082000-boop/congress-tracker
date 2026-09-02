@@ -11,6 +11,8 @@ dependencies = [
     "pyyaml>=6.0",
     "python-dotenv>=1.0",
     "pandas>=2.2",
+    "numpy>=1.26",
+    "streamlit>=1.38",
 ]
 
 [dependency-groups]
@@ -35,5 +37,5 @@ target-version = "py312"
 select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = [".", "src"]
 testpaths = ["tests"]

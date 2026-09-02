@@ -158,6 +158,7 @@ class Signal(Base):
     rsi14: Mapped[float | None] = mapped_column(Float, nullable=True)
     distance_52w_high: Mapped[float | None] = mapped_column(Float, nullable=True)
     notes: Mapped[str | None] = mapped_column(String, nullable=True)
+    processed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 class TradePaper(Base):
@@ -216,6 +217,10 @@ class BacktestMetric(Base):
     longest_underwater_days: Mapped[int] = mapped_column(Integer, nullable=False)
     win_rate_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     avg_holding_period_days: Mapped[float | None] = mapped_column(Float, nullable=True)
+    avg_profit_per_trade_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     num_trades: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sharpe: Mapped[float] = mapped_column(Float, nullable=False)
     final_equity_eur: Mapped[float] = mapped_column(Float, nullable=False)
+    # JSON-encoded [[iso_date, equity], ...] — the dashboard's equity/drawdown
+    # charts need the full daily series, not just the summary stats above.
+    equity_curve_json: Mapped[str | None] = mapped_column(String, nullable=True)

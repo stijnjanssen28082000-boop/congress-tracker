@@ -83,5 +83,11 @@ alerts:
 
 # --- Module 7: paper trading ---
 paper_trading:
+  starting_capital_eur: 100_000
   monthly_report: true
   review_after_closed_trades: 30
+  # How close paper trading's realised win rate / avg profit-per-trade must
+  # stay to the latest stored backtest's out-of-sample numbers (percentage
+  # points) before the milestone summary flags a divergence.
+  win_rate_tolerance_pct: 10.0
+  avg_profit_tolerance_pct: 5.0

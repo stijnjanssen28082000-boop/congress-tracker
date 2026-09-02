@@ -272,6 +272,7 @@ class Metrics:
     longest_underwater_days: int
     win_rate_pct: float | None
     avg_holding_period_days: float | None
+    avg_profit_per_trade_pct: float | None
     num_trades: int | None
     sharpe: float
     final_equity_eur: float
@@ -302,7 +303,19 @@ def compute_metrics(
     end: date,
 ) -> Metrics:
     if not equity_curve:
-        return Metrics(start, end, 0.0, 0.0, 0, None, None, 0, 0.0, 0.0)
+        return Metrics(
+            start=start,
+            end=end,
+            cagr_pct=0.0,
+            max_drawdown_pct=0.0,
+            longest_underwater_days=0,
+            win_rate_pct=None,
+            avg_holding_period_days=None,
+            avg_profit_per_trade_pct=None,
+            num_trades=0,
+            sharpe=0.0,
+            final_equity_eur=0.0,
+        )
 
     dates, values = zip(*equity_curve, strict=True)
     equity = pd.Series(values, index=pd.DatetimeIndex(dates))
@@ -321,20 +334,27 @@ def compute_metrics(
     daily_returns = equity.pct_change().dropna()
     daily_rf = risk_free_rate_pct / 100 / TRADING_DAYS_PER_YEAR
     excess = daily_returns - daily_rf
-    sharpe = (
-        float(excess.mean() / excess.std() * np.sqrt(TRADING_DAYS_PER_YEAR))
-        if len(excess) > 1 and excess.std() > 0
-        else 0.0
-    )
+    # A near-zero (but not exactly zero, thanks to floating point) std blows
+    # the ratio up to an absurd magnitude for an almost-perfectly-smooth
+    # curve — floor it so "effectively riskless" reports as 0.0 rather than
+    # a meaningless huge number.
+    std = float(excess.std()) if len(excess) > 1 else 0.0
+    sharpe = float(excess.mean() / std * np.sqrt(TRADING_DAYS_PER_YEAR)) if std > 1e-8 else 0.0
 
     num_trades = len(closed_trades) if closed_trades or equity_curve else None
     win_rate_pct = None
     avg_holding_period_days = None
+    avg_profit_per_trade_pct = None
     if closed_trades:
         wins = [t for t in closed_trades if (t.realized_pnl_eur or 0) > 0]
         win_rate_pct = len(wins) / len(closed_trades) * 100
         holding_periods = [(t.exit_date - t.entry_date).days for t in closed_trades]
         avg_holding_period_days = sum(holding_periods) / len(holding_periods)
+        trade_returns_pct = [
+            (t.exit_price / t.entry_price - 1) * 100 for t in closed_trades if t.exit_price
+        ]
+        if trade_returns_pct:
+            avg_profit_per_trade_pct = sum(trade_returns_pct) / len(trade_returns_pct)
 
     return Metrics(
         start=start,
@@ -344,6 +364,7 @@ def compute_metrics(
         longest_underwater_days=longest_underwater,
         win_rate_pct=win_rate_pct,
         avg_holding_period_days=avg_holding_period_days,
+        avg_profit_per_trade_pct=avg_profit_per_trade_pct,
         num_trades=num_trades,
         sharpe=sharpe,
         final_equity_eur=float(equity.iloc[-1]),
@@ -486,7 +507,19 @@ def simulate_benchmark(start: date, end: date, config: Config) -> SimulationResu
 
     if not rows:
         logger.warning("No benchmark (%s) price data in [%s, %s]", BENCHMARK_TICKER, start, end)
-        empty_metrics = Metrics(start, end, 0.0, 0.0, 0, None, None, None, 0.0, 0.0)
+        empty_metrics = Metrics(
+            start=start,
+            end=end,
+            cagr_pct=0.0,
+            max_drawdown_pct=0.0,
+            longest_underwater_days=0,
+            win_rate_pct=None,
+            avg_holding_period_days=None,
+            avg_profit_per_trade_pct=None,
+            num_trades=None,
+            sharpe=0.0,
+            final_equity_eur=0.0,
+        )
         return SimulationResult(
             equity_curve=[], closed_trades=[], review_flag_count=0, metrics=empty_metrics
         )
@@ -574,13 +607,26 @@ def store_run(
                     longest_underwater_days=m.longest_underwater_days,
                     win_rate_pct=m.win_rate_pct,
                     avg_holding_period_days=m.avg_holding_period_days,
+                    avg_profit_per_trade_pct=m.avg_profit_per_trade_pct,
                     num_trades=m.num_trades,
                     sharpe=m.sharpe,
                     final_equity_eur=m.final_equity_eur,
+                    equity_curve_json=json.dumps(
+                        [[d.isoformat(), v] for d, v in result.equity_curve]
+                    ),
                 )
             )
         run_id = run.id
     return run_id
+
+
+def load_equity_curve(metric: BacktestMetric) -> list[tuple[date, float]]:
+    """Deserializes a stored BacktestMetric.equity_curve_json back into
+    [(date, equity), ...], as produced by simulate()/simulate_benchmark()."""
+
+    if not metric.equity_curve_json:
+        return []
+    return [(date.fromisoformat(d), v) for d, v in json.loads(metric.equity_curve_json)]
 
 
 def list_runs(limit: int = 20) -> list[dict]:

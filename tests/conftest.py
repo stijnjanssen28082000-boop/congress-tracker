@@ -67,6 +67,17 @@ def db(tmp_path):
                     "in_sample_sharpe_threshold": 0.5,
                 },
             },
+            "alerts": {
+                "telegram_enabled": True,
+                "daily_run_time_cet": "07:00",
+            },
+            "paper_trading": {
+                "starting_capital_eur": 100_000,
+                "monthly_report": True,
+                "review_after_closed_trades": 30,
+                "win_rate_tolerance_pct": 10.0,
+                "avg_profit_tolerance_pct": 5.0,
+            },
         }
     )
     init_db(config)

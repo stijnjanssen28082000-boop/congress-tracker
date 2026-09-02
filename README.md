@@ -6,15 +6,15 @@ signalen en simuleert paper trades.
 
 ## Status
 
-Module 1 t/m 4 zijn klaar. Andere modules volgen in aparte stappen.
+Alle 7 modules zijn klaar.
 
 - [x] Module 1 — Datalaag (tickers, prijzen, fundamentals, ingest)
 - [x] Module 2 — Kwaliteitsfilter
 - [x] Module 3 — Signaal-engine
 - [x] Module 4 — Backtester
-- [ ] Module 5 — Dashboard
-- [ ] Module 6 — Dagelijkse run en alerts
-- [ ] Module 7 — Paper trading
+- [x] Module 5 — Dashboard
+- [x] Module 6 — Dagelijkse run en alerts
+- [x] Module 7 — Paper trading
 
 ## Installatie
 
@@ -70,6 +70,20 @@ uv run python -m stock_tracker.backtest
 
 # eerdere runs met elkaar vergelijken
 uv run python -m stock_tracker.backtest --list-runs
+
+# paper trading: openstaande signalen omzetten in orders tegen de slotkoers
+# van vandaag, en de 30-trade-milestone tonen zodra die gehaald is
+uv run python -m stock_tracker.paper
+
+# maandrapport (realised/unrealised, vs. backtest-verwachting, vs. benchmark)
+uv run python -m stock_tracker.paper --monthly-report
+
+# volledige dagelijkse pipeline: ingest -> quality (maandag) -> signals ->
+# paper -> Telegram-alert (alleen als er iets te melden is)
+uv run python -m stock_tracker.run_daily
+
+# dashboard starten
+uv run streamlit run app.py
 ```
 
 ## Modules
@@ -198,9 +212,99 @@ uv run python -m stock_tracker.backtest --list-runs
   `config.yaml` (of CLI-overrides); `out_of_sample_end: null` betekent "de
   laatst beschikbare koersdatum".
 
+### Module 5 — Dashboard
+
+- **`app.py`** (repo-root, per spec-conventie) — Streamlit-app met 5 tabs.
+  Data-laadfuncties (`load_watchlist()`, `load_signals_for_date()`,
+  `load_paper_portfolio()`, `load_recent_trades()`,
+  `save_journal_entry()`/`load_journal_entries()`/`update_journal_outcome()`)
+  bevatten bewust geen `st.*`-aanroepen, zodat ze los van Streamlit getest
+  kunnen worden; alle UI zit in `main()`.
+  - **Watchlist**: eligible tickers met afstand tot SMA50/52w-high, RSI,
+    eerstvolgende earnings-datum en actief tranche-signaal, voor een zelf
+    te kiezen datum.
+  - **Signalen vandaag**: alle `signals`-rijen voor een datum (default: de
+    meest recente met signalen), gesorteerd op type/tranche.
+  - **Portfolio (paper)**: open `trades_paper`-posities met actuele koers,
+    ongerealiseerd rendement, dagen open en de laatste `REVIEW`/
+    `EXIT_FUNDAMENTAL`-flag voor die ticker.
+  - **Backtest**: run-kiezer (uit `backtest_runs`), CAGR/max-drawdown/
+    Sharpe/trades per periode, en een equity- en drawdown-grafiek van
+    strategie vs. benchmark. Dit vereiste een schema-aanvulling: `store_run()`
+    slaat nu ook de volledige equity curve op (`BacktestMetric.equity_curve_json`,
+    uitgelezen via `backtest.load_equity_curve()`) — de eerdere versie
+    bewaarde alleen de samenvattingscijfers, onvoldoende om een grafiek te
+    tekenen.
+  - **Journal**: formulier om een `trade_id` te kiezen en reden/verwachting
+    vast te leggen; de signaalwaarden (instapprijs, SMA50, RSI14, afstand
+    tot 52w-high) worden automatisch uit het bijbehorende `ENTRY`-signaal
+    overgenomen in plaats van opnieuw te laten intypen. Bestaande entries
+    zijn een tweede stap voor de uitkomst.
+  - Smoke-getest in een echte headless Chromium-browser (Playwright) met
+    geseede data — alle 5 tabs renderen zonder fouten. Dat testen vond een
+    echte bug: een vrijwel perfect vlakke equity curve (near-zero variance)
+    liet de Sharpe-ratio in `compute_metrics()` exploderen naar een absurd
+    getal door een drijvendekomma-restje in de standaarddeviatie; nu
+    afgekapt op een epsilon-drempel (regressietest toegevoegd).
+
+### Module 6 — Dagelijkse run en alerts
+
+- **`src/stock_tracker/run_daily.py`** — orkestreert
+  `ingest.run_daily` → `quality.run_for_date` (alleen op
+  `quality.recompute_weekday`) → `signals.generate_entry_signals` +
+  `generate_exit_signals` → `paper.fill_pending_signals` → alert.
+- **`src/stock_tracker/alerts.py`** — bouwt één berichttekst met nieuwe
+  entries, exits (`EXIT`/`EXIT_FUNDAMENTAL`) en `REVIEW`-flags apart
+  gegroepeerd; geeft `None` terug (dus geen bericht) als er niets te melden
+  is. Verstuurt via de Telegram Bot API (`TELEGRAM_BOT_TOKEN`/
+  `TELEGRAM_CHAT_ID` uit `.env`); zonder configuratie wordt het bericht
+  alleen gelogd, niet verzonden (nuttig lokaal zonder bot).
+- Bij het overschrijden van `paper_trading.review_after_closed_trades`
+  (30 trades) in één run wordt er ook een milestone-bericht gestuurd
+  (win rate/gemiddelde winst vs. de laatste backtest-run) — gedetecteerd
+  door het aantal gesloten trades vóór en ná de paper-fill te vergelijken,
+  dus precies één keer, niet elke dag opnieuw.
+- **GitHub Actions** (`.github/workflows/daily.yml`): draait op
+  `0 6 * * 1-5` UTC (≈ 07:00 CET / 08:00 CEST — cron kent geen DST, dus dit
+  drift met een uur in de zomer). `data/tracker.db` overleeft runs via
+  `actions/cache/restore`+`restore-keys` (pakt de meest recente eerdere
+  cache-entry) en `actions/cache/save` onder een run-id-unieke key (zodat
+  saven nooit wordt overgeslagen); daarnaast wordt de database ook als
+  artifact geüpload (90 dagen bewaard), zoals de spec vraagt. Secrets:
+  `FMP_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
+- **Lokaal via cron**: `scripts/run_daily_cron.sh` (voegt geen restore/save
+  toe — het bestand staat al lokaal op schijf). Voorbeeld crontab-regel
+  staat in het script zelf.
+
+### Module 7 — Paper trading
+
+- **`src/stock_tracker/paper.py`** — `trades_paper` is de enige bewaarde
+  staat; er is geen apart cash-grootboek. Elke run herbouwt de portefeuille
+  (`reconstruct_portfolio()`) door `trades_paper` chronologisch te herspelen
+  door dezelfde kosten-/sizingregels als de backtester
+  (`backtest.Portfolio`/`CostConfig`/`SizingConfig`), zodat paper-resultaten
+  rechtstreeks vergelijkbaar blijven met de out-of-sample backtestcijfers.
+- **`fill_pending_signals(as_of)`**: vult elk nog niet verwerkt signaal met
+  een datum vóór `as_of` tegen `as_of`'s slotkoers — normaal gesproken exact
+  "de slotkoers van de volgende dag" t.o.v. het signaal, want de dagelijkse
+  run verwerkt gisterens signalen vandaag. Een tranche die al open staat
+  wordt niet opnieuw gekocht; `EXIT_FUNDAMENTAL` (tranche `None`) sluit alle
+  open tranches van die ticker. Signalen zonder beschikbare koers (feestdag,
+  nog niet geïngest) blijven onverwerkt voor een latere run.
+- **Maandrapport** (`monthly_report()`): realised (gesloten trades die
+  maand) en unrealised (laatst bekende koers) resultaat, plus het
+  door de laatste backtest-run geïmpliceerde rendement over dezelfde
+  periode (CAGR omgerekend naar de periodelengte) en het werkelijke
+  benchmark-rendement over die periode.
+- **30-trade-milestone** (`compare_to_backtest()`, drempel
+  `paper_trading.review_after_closed_trades`): vergelijkt de gerealiseerde
+  win rate en gemiddelde winst-per-trade met de laatste backtest-run,
+  binnen een configureerbare bandbreedte (`win_rate_tolerance_pct`,
+  `avg_profit_tolerance_pct`).
+
 ### Volgende modules
 
-Worden hier aangevuld zodra ze gebouwd zijn.
+Alle modules uit de spec zijn gebouwd.
 
 ## Tests
 
