@@ -19,6 +19,15 @@ def db(tmp_path):
                 "price_provider": "yfinance",
                 "fundamentals_provider": "fmp",
             },
+            "quality": {
+                "min_market_cap_eur": 30_000_000_000,
+                "min_revenue_growth_ttm_pct": 8.0,
+                "max_net_debt_to_ebitda": 2.0,
+                "min_avg_daily_volume": 500_000,
+                "avg_volume_lookback_days": 60,
+                "eps_estimate_lookback_days": 90,
+                "recompute_weekday": "Monday",
+            },
         }
     )
     init_db(config)

@@ -6,10 +6,10 @@ signalen en simuleert paper trades.
 
 ## Status
 
-Module 1 (datalaag) is klaar. Andere modules volgen in aparte stappen.
+Module 1 en 2 zijn klaar. Andere modules volgen in aparte stappen.
 
 - [x] Module 1 — Datalaag (tickers, prijzen, fundamentals, ingest)
-- [ ] Module 2 — Kwaliteitsfilter
+- [x] Module 2 — Kwaliteitsfilter
 - [ ] Module 3 — Signaal-engine
 - [ ] Module 4 — Backtester
 - [ ] Module 5 — Dashboard
@@ -53,6 +53,15 @@ uv run python -m stock_tracker.ingest --daily
 `--daily` haalt voor elke ticker alleen de dagen op na de laatste bekende
 koersdatum in de database (geen dubbele of overlappende data).
 
+```bash
+# kwaliteitsfilter herberekenen (bv. elke maandag, zie config.yaml: quality.recompute_weekday)
+uv run python -m stock_tracker.quality
+
+# eligible-lijst met terugwerkende kracht opbouwen na `ingest.py --full`,
+# zodat de backtest (Module 4) point-in-time eligibility heeft
+uv run python -m stock_tracker.quality --backfill-start 2012-01-01 --backfill-end 2026-01-01
+```
+
 ## Modules
 
 ### Module 1 — Datalaag
@@ -76,6 +85,28 @@ koersdatum in de database (geen dubbele of overlappende data).
 - **`src/stock_tracker/ingest.py`** — CLI-entrypoint: `--full` haalt 12 jaar
   historie op, `--daily` werkt incrementeel bij op basis van de laatst
   bekende datum per ticker.
+
+### Module 2 — Kwaliteitsfilter
+
+- **`src/stock_tracker/quality.py`** — berekent per ticker een score op zes
+  harde criteria (marktkap, positieve FCF laatste 4 kwartalen, omzetgroei TTM,
+  nettoschuld/EBITDA, stijgende consensus-EPS t.o.v. 90 dagen geleden,
+  gemiddeld dagvolume) en slaat het resultaat op in `quality_scores`. Een
+  ticker is `eligible` alleen als alle zes criteria slagen.
+- Alles is point-in-time: fundamentals worden gefilterd op `report_date <=
+  as_of` (de dag waarop het cijfer daadwerkelijk gepubliceerd werd, niet de
+  boekhoudperiode die het beslaat), analistenverwachtingen op `as_of_date <=
+  as_of`, koersen op `date <= as_of`. Er wordt dus nooit informatie gebruikt
+  die op dat moment nog niet bekend was — noodzakelijk voor een eerlijke
+  backtest.
+- `run_for_date(as_of)` berekent en bewaart scores voor het hele universum op
+  één datum; `get_eligible_tickers(as_of)` geeft de eligible-lijst terug op
+  basis van elke tickers meest recente snapshot op of vóór die datum (want de
+  score wordt wekelijks herberekend, maar signalen worden dagelijks gebruikt).
+- `backfill(start, end)` herberekent voor elke `quality.recompute_weekday`
+  (default maandag) in een periode — nodig om na `ingest.py --full` de
+  historie te vullen zodat de walk-forward backtest (Module 4) niet met
+  look-ahead werkt.
 
 ### Volgende modules
 

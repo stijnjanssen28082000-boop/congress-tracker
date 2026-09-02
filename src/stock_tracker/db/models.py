@@ -116,6 +116,30 @@ class EarningsCalendar(Base):
     source: Mapped[str] = mapped_column(String, nullable=False)
 
 
+class QualityScore(Base):
+    __tablename__ = "quality_scores"
+    __table_args__ = (UniqueConstraint("ticker", "date", name="uq_quality_scores_ticker_date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ticker: Mapped[str] = mapped_column(ForeignKey("tickers.ticker"), nullable=False)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    score: Mapped[int] = mapped_column(Integer, nullable=False)
+    eligible: Mapped[bool] = mapped_column(Boolean, nullable=False)
+
+    market_cap_eur: Mapped[float | None] = mapped_column(Float, nullable=True)
+    market_cap_pass: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    fcf_positive_pass: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    revenue_growth_ttm_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    revenue_growth_pass: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    net_debt_to_ebitda: Mapped[float | None] = mapped_column(Float, nullable=True)
+    net_debt_ebitda_pass: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    eps_estimate_current: Mapped[float | None] = mapped_column(Float, nullable=True)
+    eps_estimate_prior: Mapped[float | None] = mapped_column(Float, nullable=True)
+    eps_estimate_trend_pass: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    avg_daily_volume: Mapped[float | None] = mapped_column(Float, nullable=True)
+    volume_pass: Mapped[bool] = mapped_column(Boolean, nullable=False)
+
+
 class Signal(Base):
     __tablename__ = "signals"
     __table_args__ = (
