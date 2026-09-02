@@ -65,7 +65,7 @@ class QualityResult:
         return self.score == _CRITERIA_COUNT
 
 
-def _latest_estimate(
+def latest_estimate(
     session: Session, ticker: str, fiscal_year: int, on_or_before: date
 ) -> AnalystEstimate | None:
     return (
@@ -154,8 +154,8 @@ def compute_quality(
 
     next_fiscal_year = as_of.year + 1
     lookback_date = as_of - timedelta(days=quality_cfg.eps_estimate_lookback_days)
-    current_estimate = _latest_estimate(session, ticker_row.ticker, next_fiscal_year, as_of)
-    prior_estimate = _latest_estimate(session, ticker_row.ticker, next_fiscal_year, lookback_date)
+    current_estimate = latest_estimate(session, ticker_row.ticker, next_fiscal_year, as_of)
+    prior_estimate = latest_estimate(session, ticker_row.ticker, next_fiscal_year, lookback_date)
     eps_estimate_current = current_estimate.eps_estimate if current_estimate else None
     eps_estimate_prior = prior_estimate.eps_estimate if prior_estimate else None
     eps_estimate_trend_pass = (

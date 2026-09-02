@@ -6,11 +6,11 @@ signalen en simuleert paper trades.
 
 ## Status
 
-Module 1 en 2 zijn klaar. Andere modules volgen in aparte stappen.
+Module 1, 2 en 3 zijn klaar. Andere modules volgen in aparte stappen.
 
 - [x] Module 1 — Datalaag (tickers, prijzen, fundamentals, ingest)
 - [x] Module 2 — Kwaliteitsfilter
-- [ ] Module 3 — Signaal-engine
+- [x] Module 3 — Signaal-engine
 - [ ] Module 4 — Backtester
 - [ ] Module 5 — Dashboard
 - [ ] Module 6 — Dagelijkse run en alerts
@@ -60,6 +60,9 @@ uv run python -m stock_tracker.quality
 # eligible-lijst met terugwerkende kracht opbouwen na `ingest.py --full`,
 # zodat de backtest (Module 4) point-in-time eligibility heeft
 uv run python -m stock_tracker.quality --backfill-start 2012-01-01 --backfill-end 2026-01-01
+
+# signalen genereren voor vandaag (entries + exits/review/fundamentele stops)
+uv run python -m stock_tracker.signals
 ```
 
 ## Modules
@@ -107,6 +110,30 @@ uv run python -m stock_tracker.quality --backfill-start 2012-01-01 --backfill-en
   (default maandag) in een periode — nodig om na `ingest.py --full` de
   historie te vullen zodat de walk-forward backtest (Module 4) niet met
   look-ahead werkt.
+
+### Module 3 — Signaal-engine
+
+- **`src/stock_tracker/signals.py`** — genereert per dag entry- en
+  exit-signalen en slaat ze op in `signals`.
+- **Entry** (alleen voor tickers op de eligible-lijst van Module 2):
+  `compute_indicators()` berekent SMA50, RSI(14) (eenvoudige, ongesmoothde
+  variant) en de 52-weken-high, allemaal point-in-time (alleen koersen
+  `<= as_of`). `_entry_tranche()` kiest de diepste tranche waarvan de
+  prijsdrempel gehaald wordt (tranche 3 > 2 > 1, want een daling van 25%
+  impliceert ook een daling van 15% en 8%); tranche 1 vereist bovendien
+  RSI < 35. Een aankomende earnings-datum binnen `earnings_guard_days`
+  handelsdagen onderdrukt het entry-signaal (`_within_earnings_guard()`,
+  telt handelsdagen met `numpy.busday_count`).
+- **Exit** (voor open posities in `trades_paper`, per tranche):
+  winstdoel (`+10%` t.o.v. instapprijs) of slot boven SMA50 → `EXIT`;
+  langer dan `time_stop_weeks` open zónder dat een van beide is gebeurd →
+  `REVIEW`; ticker valt uit de eligible-lijst of de eerstvolgende-jaar
+  EPS-consensus is > `eps_estimate_drop_pct` gedaald t.o.v. 90 dagen
+  geleden (herbruikt `quality.latest_estimate`) → `EXIT_FUNDAMENTAL`
+  (ticker-breed, niet per tranche — sluit alle open tranches van die
+  ticker).
+- `run_for_date(as_of)` genereert en bewaart beide soorten signalen voor
+  één datum (upsert op ticker+datum+type+tranche, dus idempotent).
 
 ### Volgende modules
 

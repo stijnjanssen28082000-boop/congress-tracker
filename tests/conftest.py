@@ -28,6 +28,19 @@ def db(tmp_path):
                 "eps_estimate_lookback_days": 90,
                 "recompute_weekday": "Monday",
             },
+            "signals": {
+                "tranche_1": {"sma50_discount_pct": 8.0, "rsi_threshold": 35, "rsi_period": 14},
+                "tranche_2": {"sma50_discount_pct": 15.0},
+                "tranche_3": {"sma50_discount_pct": 25.0},
+                "sma_period": 50,
+                "high_lookback_weeks": 52,
+                "exit": {
+                    "profit_target_pct": 10.0,
+                    "time_stop_weeks": 12,
+                    "eps_estimate_drop_pct": 10.0,
+                },
+                "earnings_guard_days": 5,
+            },
         }
     )
     init_db(config)
