@@ -1,0 +1,76 @@
+# stock-tracker configuration
+# All strategy thresholds and universe filters live here — never hardcode them in code.
+
+database:
+  path: "data/tracker.db"
+
+logging:
+  dir: "logs"
+  level: "INFO"
+
+universe:
+  indices:
+    - "SP500"
+    - "EURONEXT100"
+    - "AEX"
+    - "BEL20"
+  base_currency: "EUR"
+
+ingest:
+  full_history_years: 12
+  price_provider: "yfinance"
+  fundamentals_provider: "fmp"
+
+# --- Module 2: quality filter ---
+quality:
+  min_market_cap_eur: 30_000_000_000
+  min_revenue_growth_ttm_pct: 8.0
+  max_net_debt_to_ebitda: 2.0
+  min_avg_daily_volume: 500_000
+  eps_estimate_lookback_days: 90
+  recompute_weekday: "Monday"
+
+# --- Module 3: signal engine ---
+signals:
+  tranche_1:
+    sma50_discount_pct: 8.0
+    rsi_threshold: 35
+    rsi_period: 14
+  tranche_2:
+    sma50_discount_pct: 15.0
+  tranche_3:
+    sma50_discount_pct: 25.0
+  sma_period: 50
+  high_lookback_weeks: 52
+  exit:
+    profit_target_pct: 10.0
+    time_stop_weeks: 12
+    eps_estimate_drop_pct: 10.0
+  earnings_guard_days: 5
+
+# --- Module 4: backtester ---
+backtest:
+  in_sample_start: "2012-01-01"
+  in_sample_end: "2019-12-31"
+  out_of_sample_start: "2020-01-01"
+  position_sizing:
+    max_pct_per_tranche: 2.0
+    max_pct_per_ticker: 6.0
+    max_pct_per_sector: 25.0
+    min_cash_pct: 20.0
+  costs:
+    slippage_pct: 0.1
+    belgian_tob_pct: 0.35
+    capital_gains_tax_pct: 10.0
+    broker_fee_pct: 0.0
+  benchmark: "SP500"
+
+# --- Module 6: alerts ---
+alerts:
+  telegram_enabled: true
+  daily_run_time_cet: "07:00"
+
+# --- Module 7: paper trading ---
+paper_trading:
+  monthly_report: true
+  review_after_closed_trades: 30
