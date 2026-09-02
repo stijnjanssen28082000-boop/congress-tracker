@@ -6,12 +6,12 @@ signalen en simuleert paper trades.
 
 ## Status
 
-Module 1, 2 en 3 zijn klaar. Andere modules volgen in aparte stappen.
+Module 1 t/m 4 zijn klaar. Andere modules volgen in aparte stappen.
 
 - [x] Module 1 — Datalaag (tickers, prijzen, fundamentals, ingest)
 - [x] Module 2 — Kwaliteitsfilter
 - [x] Module 3 — Signaal-engine
-- [ ] Module 4 — Backtester
+- [x] Module 4 — Backtester
 - [ ] Module 5 — Dashboard
 - [ ] Module 6 — Dagelijkse run en alerts
 - [ ] Module 7 — Paper trading
@@ -63,6 +63,13 @@ uv run python -m stock_tracker.quality --backfill-start 2012-01-01 --backfill-en
 
 # signalen genereren voor vandaag (entries + exits/review/fundamentele stops)
 uv run python -m stock_tracker.signals
+
+# walk-forward backtest draaien (in-sample 2012-2019, out-of-sample 2020-heden
+# uit config.yaml) en het resultaat opslaan
+uv run python -m stock_tracker.backtest
+
+# eerdere runs met elkaar vergelijken
+uv run python -m stock_tracker.backtest --list-runs
 ```
 
 ## Modules
@@ -118,11 +125,11 @@ uv run python -m stock_tracker.signals
 - **Entry** (alleen voor tickers op de eligible-lijst van Module 2):
   `compute_indicators()` berekent SMA50, RSI(14) (eenvoudige, ongesmoothde
   variant) en de 52-weken-high, allemaal point-in-time (alleen koersen
-  `<= as_of`). `_entry_tranche()` kiest de diepste tranche waarvan de
+  `<= as_of`). `entry_tranche()` kiest de diepste tranche waarvan de
   prijsdrempel gehaald wordt (tranche 3 > 2 > 1, want een daling van 25%
   impliceert ook een daling van 15% en 8%); tranche 1 vereist bovendien
   RSI < 35. Een aankomende earnings-datum binnen `earnings_guard_days`
-  handelsdagen onderdrukt het entry-signaal (`_within_earnings_guard()`,
+  handelsdagen onderdrukt het entry-signaal (`within_earnings_guard()`,
   telt handelsdagen met `numpy.busday_count`).
 - **Exit** (voor open posities in `trades_paper`, per tranche):
   winstdoel (`+10%` t.o.v. instapprijs) of slot boven SMA50 → `EXIT`;
@@ -134,6 +141,62 @@ uv run python -m stock_tracker.signals
   ticker).
 - `run_for_date(as_of)` genereert en bewaart beide soorten signalen voor
   één datum (upsert op ticker+datum+type+tranche, dus idempotent).
+
+### Module 4 — Backtester
+
+- **`src/stock_tracker/backtest.py`** — dag-voor-dag event-driven simulatie
+  in pandas/pure Python, **niet** `vectorbt`: de regels van deze strategie
+  (per-tranche sizing, per-ticker/per-sector exposure-caps, een cash-vloer,
+  jaarlijkse belastingafrekening, point-in-time eligibility) zijn inherent
+  sequentieel/stateful, geen vectoriseerbare signaalarray — vectorbt zou hier
+  meer tegenwerken dan helpen, bovenop een zware numba-compile-dependency die
+  deze sandbox niet nodig heeft. `pandas` wordt wel gebruikt waar het wél
+  past: de equity curve omzetten naar CAGR/drawdown/Sharpe.
+- **Geld in EUR, techniek in `close_eur`**: in tegenstelling tot Module 3
+  (dat native `close` gebruikt, wat een trader op de eigen beurs ziet)
+  rekent de backtest SMA50/RSI(14)/tranche-drempels op basis van `close_eur`
+  (`indicators_eur()`, `entry_tranche_eur()`), zodat positiegrootte, kosten
+  en belasting consistent in één munt lopen — inclusief het effect van
+  wisselkoersbewegingen tussen instap en exit.
+- **Portfolio-boekhouding** (`Portfolio`-klasse): elke tranche-instap wordt
+  exact 2% van de actuele equity; een tweede instap in dezelfde tranche
+  van dezelfde ticker wordt geweigerd zolang die tranche al open staat
+  (anders zou een signaal dat meerdere dagen achter elkaar geldig blijft
+  elke dag opnieuw kopen). Voor elke instap/exit: 0,1% slippage op de
+  vulprijs, 0,35% Belgische TOB + configureerbare brokerfee op het
+  transactiebedrag. Per kalenderjaar wordt het netto gerealiseerde
+  resultaat bijgehouden; bij een jaarovergang wordt 10% meerwaardebelasting
+  ingehouden op een positief jaarresultaat (nooit een teruggave bij
+  verlies).
+- **Exit-prioriteit per open tranche**: winstdoel/slot-boven-SMA50 eerst
+  (`EXIT`), anders fundamentele stop (niet meer eligible, of EPS-verwachting
+  > `eps_estimate_drop_pct` gedaald — ticker-breed, sluit alle tranches),
+  anders een `REVIEW`-telling bij `time_stop_weeks` zonder herstel — dat
+  laatste is puur informatief en sluit de positie niet automatisch (net als
+  in Module 3: "flag", geen "EXIT").
+- **Benchmark**: `^GSPC` (S&P 500-index) is via `universe.fetch_benchmark()`
+  aan het universum toegevoegd zodat hij gewoon meeloopt in `ingest.py`
+  (alleen koersen, geen fundamentals — verschijnt daardoor nooit op de
+  eligible-lijst). `simulate_benchmark()` simuleert buy & hold met hetzelfde
+  startkapitaal.
+- **Metrics** (`compute_metrics()`, per periode en voor strategie/benchmark
+  apart): CAGR, max drawdown, langste periode onder water (aaneengesloten
+  dagen onder de lopende piek), Sharpe (configureerbare risicovrije voet),
+  win rate, gemiddelde holding period, aantal trades, eindkapitaal.
+- **Overfitting-waarschuwing** (`check_overfitting()`): waarschuwt expliciet
+  als de out-of-sample CAGR relatief veel lager is dan in-sample
+  (`overfitting_check.cagr_degradation_pct`), of als de out-of-sample Sharpe
+  instort terwijl in-sample duidelijk positief was
+  (`in_sample_sharpe_threshold` / `sharpe_floor`) — beide drempels in
+  `config.yaml`, niet hardcoded.
+- **Opslag** (`store_run()`/`list_runs()`): elke run komt met datum,
+  config-hash (sha256 van de volledige config) en de vier metric-sets
+  (in/out-of-sample × strategie/benchmark) in `backtest_runs` /
+  `backtest_metrics`, zodat runs met verschillende configs te vergelijken
+  zijn.
+- `run()` lost `in_sample_start/end` en `out_of_sample_start/end` op uit
+  `config.yaml` (of CLI-overrides); `out_of_sample_end: null` betekent "de
+  laatst beschikbare koersdatum".
 
 ### Volgende modules
 

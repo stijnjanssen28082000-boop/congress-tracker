@@ -186,3 +186,36 @@ class Journal(Base):
     expectation: Mapped[str | None] = mapped_column(String, nullable=True)
     outcome: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class BacktestRun(Base):
+    __tablename__ = "backtest_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    config_hash: Mapped[str] = mapped_column(String, nullable=False)
+    notes: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class BacktestMetric(Base):
+    __tablename__ = "backtest_metrics"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id", "period", "source", name="uq_backtest_metrics_run_period_source"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("backtest_runs.id"), nullable=False)
+    period: Mapped[str] = mapped_column(String, nullable=False)  # "in_sample" | "out_of_sample"
+    source: Mapped[str] = mapped_column(String, nullable=False)  # "strategy" | "benchmark"
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    cagr_pct: Mapped[float] = mapped_column(Float, nullable=False)
+    max_drawdown_pct: Mapped[float] = mapped_column(Float, nullable=False)
+    longest_underwater_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    win_rate_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    avg_holding_period_days: Mapped[float | None] = mapped_column(Float, nullable=True)
+    num_trades: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sharpe: Mapped[float] = mapped_column(Float, nullable=False)
+    final_equity_eur: Mapped[float] = mapped_column(Float, nullable=False)

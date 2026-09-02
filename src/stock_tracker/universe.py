@@ -99,7 +99,28 @@ def fetch_bel20() -> list[dict]:
     return entries
 
 
-DEFAULT_FETCHERS = (fetch_sp500, fetch_euronext100, fetch_aex, fetch_bel20)
+BENCHMARK_TICKER = "^GSPC"
+
+
+def fetch_benchmark() -> list[dict]:
+    """Adds the S&P 500 index itself as a ticker, so it gets ingested (prices
+    only — it has no fundamentals) alongside the rest of the universe. Module
+    4's backtester uses it as the buy & hold benchmark. It never appears in
+    `quality_scores`/eligible lists since it has no fundamentals to score."""
+
+    return [
+        {
+            "ticker": BENCHMARK_TICKER,
+            "name": "S&P 500 Index",
+            "exchange": "INDEX",
+            "currency": "USD",
+            "sector": None,
+            "index_membership": "BENCHMARK",
+        }
+    ]
+
+
+DEFAULT_FETCHERS = (fetch_sp500, fetch_euronext100, fetch_aex, fetch_bel20, fetch_benchmark)
 
 
 def build_universe(fetchers=DEFAULT_FETCHERS) -> list[dict]:

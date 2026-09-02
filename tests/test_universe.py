@@ -1,6 +1,12 @@
 from stock_tracker.db.models import Ticker
 from stock_tracker.db.session import get_session
-from stock_tracker.universe import build_universe, sync_universe_to_db
+from stock_tracker.universe import (
+    BENCHMARK_TICKER,
+    DEFAULT_FETCHERS,
+    build_universe,
+    fetch_benchmark,
+    sync_universe_to_db,
+)
 
 
 def _fake_sp500():
@@ -59,6 +65,18 @@ def test_build_universe_merges_membership_for_overlapping_ticker():
 def test_build_universe_skips_failing_fetcher():
     universe = build_universe(fetchers=(_fake_sp500, _failing_fetcher))
     assert len(universe) == 1
+
+
+def test_fetch_benchmark_returns_sp500_index():
+    entries = fetch_benchmark()
+    assert len(entries) == 1
+    assert entries[0]["ticker"] == BENCHMARK_TICKER
+    assert entries[0]["index_membership"] == "BENCHMARK"
+    assert entries[0]["sector"] is None
+
+
+def test_default_fetchers_include_benchmark():
+    assert fetch_benchmark in DEFAULT_FETCHERS
 
 
 def test_sync_universe_to_db_inserts_and_updates(db):

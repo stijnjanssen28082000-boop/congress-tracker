@@ -53,13 +53,13 @@ class SignalResult:
     notes: str | None = None
 
 
-def _sma(closes: list[float], period: int) -> float | None:
+def sma(closes: list[float], period: int) -> float | None:
     if len(closes) < period:
         return None
     return sum(closes[-period:]) / period
 
 
-def _rsi(closes: list[float], period: int) -> float | None:
+def rsi(closes: list[float], period: int) -> float | None:
     """Simple (unsmoothed) RSI over `period` daily changes."""
     if len(closes) < period + 1:
         return None
@@ -106,14 +106,14 @@ def compute_indicators(session, ticker: str, as_of: date, config: Config) -> Pri
     return PriceIndicators(
         date=as_of,
         close=today_close,
-        sma50=_sma(closes, sma_period),
-        rsi14=_rsi(closes, rsi_period),
+        sma50=sma(closes, sma_period),
+        rsi14=rsi(closes, rsi_period),
         high_52w=high_52w,
         distance_to_52w_high_pct=distance,
     )
 
 
-def _entry_tranche(indicators: PriceIndicators, config: Config) -> int | None:
+def entry_tranche(indicators: PriceIndicators, config: Config) -> int | None:
     """Returns the deepest tranche whose price threshold is met, or None.
     Tranche 2/3 are price-only; tranche 1 additionally requires RSI(14) < threshold."""
 
@@ -135,7 +135,7 @@ def _entry_tranche(indicators: PriceIndicators, config: Config) -> int | None:
     return None
 
 
-def _within_earnings_guard(session, ticker: str, as_of: date, guard_trading_days: int) -> bool:
+def within_earnings_guard(session, ticker: str, as_of: date, guard_trading_days: int) -> bool:
     """True if an earnings date falls within the `guard_trading_days` trading
     days strictly *before* `as_of` (the guard doesn't cover the earnings day
     itself, only the run-up to it)."""
@@ -152,7 +152,7 @@ def _within_earnings_guard(session, ticker: str, as_of: date, guard_trading_days
     return 1 <= trading_days_until <= guard_trading_days
 
 
-def _eps_estimate_dropped(session, ticker: str, as_of: date, config: Config) -> bool:
+def eps_estimate_dropped(session, ticker: str, as_of: date, config: Config) -> bool:
     fiscal_year = as_of.year + 1
     lookback_date = as_of - timedelta(days=config.quality.eps_estimate_lookback_days)
     current = latest_estimate(session, ticker, fiscal_year, as_of)
@@ -174,10 +174,10 @@ def generate_entry_signals(as_of: date, config: Config | None = None) -> list[Si
             indicators = compute_indicators(session, ticker, as_of, config)
             if indicators is None:
                 continue
-            tranche = _entry_tranche(indicators, config)
+            tranche = entry_tranche(indicators, config)
             if tranche is None:
                 continue
-            if _within_earnings_guard(session, ticker, as_of, guard_days):
+            if within_earnings_guard(session, ticker, as_of, guard_days):
                 logger.debug("%s: entry suppressed by earnings guard", ticker)
                 continue
             results.append(
@@ -257,7 +257,7 @@ def generate_exit_signals(as_of: date, config: Config | None = None) -> list[Sig
             if indicators is None:
                 continue
             fell_out_of_eligible = ticker not in eligible
-            eps_dropped = _eps_estimate_dropped(session, ticker, as_of, config)
+            eps_dropped = eps_estimate_dropped(session, ticker, as_of, config)
             if not (fell_out_of_eligible or eps_dropped):
                 continue
             reasons = []

@@ -51,9 +51,12 @@ signals:
 
 # --- Module 4: backtester ---
 backtest:
+  initial_capital_eur: 100_000
   in_sample_start: "2012-01-01"
   in_sample_end: "2019-12-31"
   out_of_sample_start: "2020-01-01"
+  out_of_sample_end: null  # null = latest available price date
+  risk_free_rate_pct: 0.0  # used for Sharpe; spec doesn't fix a value
   position_sizing:
     max_pct_per_tranche: 2.0
     max_pct_per_ticker: 6.0
@@ -65,6 +68,13 @@ backtest:
     capital_gains_tax_pct: 10.0
     broker_fee_pct: 0.0
   benchmark: "SP500"
+  overfitting_check:
+    # Warn if out-of-sample CAGR is this much (relative) lower than in-sample.
+    cagr_degradation_pct: 50.0
+    # Warn if out-of-sample Sharpe falls to/below this while in-sample Sharpe
+    # was clearly positive (above in_sample_sharpe_threshold).
+    sharpe_floor: 0.0
+    in_sample_sharpe_threshold: 0.5
 
 # --- Module 6: alerts ---
 alerts:

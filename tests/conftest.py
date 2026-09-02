@@ -41,6 +41,32 @@ def db(tmp_path):
                 },
                 "earnings_guard_days": 5,
             },
+            "backtest": {
+                "initial_capital_eur": 100_000,
+                "in_sample_start": "2012-01-01",
+                "in_sample_end": "2019-12-31",
+                "out_of_sample_start": "2020-01-01",
+                "out_of_sample_end": None,
+                "risk_free_rate_pct": 0.0,
+                "position_sizing": {
+                    "max_pct_per_tranche": 2.0,
+                    "max_pct_per_ticker": 6.0,
+                    "max_pct_per_sector": 25.0,
+                    "min_cash_pct": 20.0,
+                },
+                "costs": {
+                    "slippage_pct": 0.1,
+                    "belgian_tob_pct": 0.35,
+                    "capital_gains_tax_pct": 10.0,
+                    "broker_fee_pct": 0.0,
+                },
+                "benchmark": "SP500",
+                "overfitting_check": {
+                    "cagr_degradation_pct": 50.0,
+                    "sharpe_floor": 0.0,
+                    "in_sample_sharpe_threshold": 0.5,
+                },
+            },
         }
     )
     init_db(config)

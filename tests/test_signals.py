@@ -145,14 +145,14 @@ def test_tranche_3_deep_discount(db):
     _seed_ticker()
     _seed_prices("AAPL", AS_OF, 60, baseline=100, today_close=70)
     result = _indicators(config=db)
-    assert signals._entry_tranche(result, db) == 3
+    assert signals.entry_tranche(result, db) == 3
 
 
 def test_tranche_2_moderate_discount(db):
     _seed_ticker()
     _seed_prices("AAPL", AS_OF, 60, baseline=100, today_close=84)
     result = _indicators(config=db)
-    assert signals._entry_tranche(result, db) == 2
+    assert signals.entry_tranche(result, db) == 2
 
 
 def test_tranche_1_requires_price_and_rsi(db):
@@ -160,14 +160,14 @@ def test_tranche_1_requires_price_and_rsi(db):
     _seed_prices("AAPL", AS_OF, 60, baseline=100, today_close=91)
     result = _indicators(config=db)
     assert result.rsi14 < 35
-    assert signals._entry_tranche(result, db) == 1
+    assert signals.entry_tranche(result, db) == 1
 
 
 def test_no_entry_when_discount_insufficient(db):
     _seed_ticker()
     _seed_prices("AAPL", AS_OF, 60, baseline=100, today_close=97)
     result = _indicators(config=db)
-    assert signals._entry_tranche(result, db) is None
+    assert signals.entry_tranche(result, db) is None
 
 
 # --- earnings guard ---------------------------------------------------------
@@ -177,20 +177,20 @@ def test_earnings_guard_suppresses_within_window(db):
     _seed_ticker()
     _seed_earnings("AAPL", date(2024, 6, 6))  # 3 trading days after AS_OF
     with get_session() as session:
-        assert signals._within_earnings_guard(session, "AAPL", AS_OF, 5) is True
+        assert signals.within_earnings_guard(session, "AAPL", AS_OF, 5) is True
 
 
 def test_earnings_guard_allows_outside_window(db):
     _seed_ticker()
     _seed_earnings("AAPL", date(2024, 6, 11))  # 6 trading days after AS_OF
     with get_session() as session:
-        assert signals._within_earnings_guard(session, "AAPL", AS_OF, 5) is False
+        assert signals.within_earnings_guard(session, "AAPL", AS_OF, 5) is False
 
 
 def test_earnings_guard_allows_when_no_upcoming_earnings(db):
     _seed_ticker()
     with get_session() as session:
-        assert signals._within_earnings_guard(session, "AAPL", AS_OF, 5) is False
+        assert signals.within_earnings_guard(session, "AAPL", AS_OF, 5) is False
 
 
 # --- generate_entry_signals -------------------------------------------------
