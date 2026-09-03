@@ -176,6 +176,31 @@ def test_revenue_growth_requires_eight_quarters(db):
     assert result.revenue_growth_pass is False
 
 
+def test_revenue_growth_falls_back_to_yoy_with_five_quarters(db):
+    _seed_ticker()
+    _seed_fundamentals("AAPL", FUNDAMENTALS_ALL_PASS[:5])
+    _seed_estimate("AAPL", date(2024, 1, 10), 2025, 5.0)
+    _seed_estimate("AAPL", date(2024, 5, 15), 2025, 6.0)
+    _seed_prices("AAPL", AS_OF, 60, 1_000_000)
+
+    result = _compute()
+
+    # Most recent quarter (1100) vs the same quarter a year prior (900).
+    assert result.revenue_growth_ttm_pct == pytest.approx((1100 / 900 - 1) * 100)
+    assert result.revenue_growth_pass is True
+
+
+def test_revenue_growth_prefers_eight_quarter_ttm_over_fallback(db):
+    _seed_all_pass()
+    result = _compute()
+
+    # With all 8 quarters present, uses trailing-twelve-month, not the
+    # 5-quarter YoY fallback (which would give a different number here).
+    ttm_now = sum(r[2] for r in _FUNDAMENTALS_ROWS[:4])
+    ttm_prior = sum(r[2] for r in _FUNDAMENTALS_ROWS[4:8])
+    assert result.revenue_growth_ttm_pct == pytest.approx((ttm_now / ttm_prior - 1) * 100)
+
+
 def test_net_debt_to_ebitda_above_threshold_fails(db):
     _seed_all_pass()
     with get_session() as session:

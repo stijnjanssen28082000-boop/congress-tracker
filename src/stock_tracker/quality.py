@@ -137,6 +137,19 @@ def compute_quality(
         ttm_prior = sum(q.revenue for q in fundamentals[4:8])
         if ttm_prior:
             revenue_growth_ttm_pct = (ttm_now / ttm_prior - 1) * 100
+    elif (
+        len(fundamentals) >= 5
+        and fundamentals[0].revenue is not None
+        and fundamentals[4].revenue is not None
+    ):
+        # Fallback for providers that don't expose 8 quarters of history
+        # (e.g. yfinance's quarterly statements typically only go back
+        # 4-5 quarters): year-over-year single-quarter growth instead of
+        # trailing-twelve-month, using the quarter 4 periods back as the
+        # same quarter a year prior.
+        prior_revenue = fundamentals[4].revenue
+        if prior_revenue:
+            revenue_growth_ttm_pct = (fundamentals[0].revenue / prior_revenue - 1) * 100
     revenue_growth_pass = (
         revenue_growth_ttm_pct is not None
         and revenue_growth_ttm_pct > quality_cfg.min_revenue_growth_ttm_pct
