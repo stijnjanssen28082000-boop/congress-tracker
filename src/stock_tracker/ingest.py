@@ -91,19 +91,31 @@ def _store_fundamentals(ticker: str, snapshots, source: str) -> int:
     if not snapshots:
         return 0
     with get_session() as session:
-        existing_periods = {
-            p
-            for (p,) in session.query(Fundamentals.period_end)
-            .filter(Fundamentals.ticker == ticker)
-            .all()
+        existing_by_period = {
+            row.period_end: row
+            for row in session.query(Fundamentals).filter(Fundamentals.ticker == ticker).all()
         }
         stored = 0
+        seen_periods: set = set()
         for snap in snapshots:
             # Also guards against a provider returning the same period twice
             # in one call, not just periods already stored from an earlier run.
-            if snap.period_end in existing_periods:
+            if snap.period_end in seen_periods:
                 continue
-            existing_periods.add(snap.period_end)
+            seen_periods.add(snap.period_end)
+
+            existing = existing_by_period.get(snap.period_end)
+            if existing is not None:
+                # Unlike revenue/fcf/net_debt/ebitda (frozen once filed, for
+                # backtest point-in-time correctness), market_cap is a
+                # "current" snapshot value, not historical -- keep it fresh
+                # on every full ingest instead of freezing whatever it
+                # happened to be (even None, from a since-fixed bug) the
+                # first time this period was stored.
+                if snap.market_cap is not None:
+                    existing.market_cap = snap.market_cap
+                continue
+
             session.add(
                 Fundamentals(
                     ticker=ticker,

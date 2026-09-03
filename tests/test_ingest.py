@@ -3,7 +3,14 @@ from datetime import date, timedelta
 import pytest
 
 from stock_tracker import ingest
-from stock_tracker.db.models import AnalystEstimate, EarningsCalendar, FxRate, PriceDaily, Ticker
+from stock_tracker.db.models import (
+    AnalystEstimate,
+    EarningsCalendar,
+    Fundamentals,
+    FxRate,
+    PriceDaily,
+    Ticker,
+)
 from stock_tracker.db.session import get_session
 from stock_tracker.providers.base import (
     EarningsEvent,
@@ -141,6 +148,91 @@ def test_run_daily_uses_fallback_start_when_no_prior_data(db, mocker):
 
     _, start, end = fake_provider.calls[0]
     assert start == end.replace(year=end.year - db.ingest.full_history_years)
+
+
+def test_store_fundamentals_refreshes_market_cap_on_existing_period(db):
+    _seed_ticker()
+    period_end = date(2024, 3, 31)
+    report_date = date(2024, 5, 1)
+    ingest._store_fundamentals(
+        "AAPL",
+        [
+            FundamentalsSnapshot(
+                period_end=period_end,
+                report_date=report_date,
+                revenue=1000,
+                free_cash_flow=10,
+                net_debt=5,
+                ebitda=20,
+                market_cap=None,  # e.g. the since-fixed provider bug
+            )
+        ],
+        source="yfinance",
+    )
+
+    stored = ingest._store_fundamentals(
+        "AAPL",
+        [
+            FundamentalsSnapshot(
+                period_end=period_end,
+                report_date=report_date,
+                revenue=999999,  # a provider would never actually change this
+                free_cash_flow=999999,
+                net_debt=999999,
+                ebitda=999999,
+                market_cap=42_000_000_000,
+            )
+        ],
+        source="yfinance",
+    )
+
+    assert stored == 0  # no new row -- it's an update, not an insert
+    with get_session() as session:
+        row = session.query(Fundamentals).filter_by(ticker="AAPL", period_end=period_end).one()
+        assert row.market_cap == 42_000_000_000
+        # Historical, point-in-time-frozen fields stay as first filed.
+        assert row.revenue == 1000
+        assert row.free_cash_flow == 10
+
+
+def test_store_fundamentals_keeps_existing_market_cap_when_new_value_is_none(db):
+    _seed_ticker()
+    period_end = date(2024, 3, 31)
+    ingest._store_fundamentals(
+        "AAPL",
+        [
+            FundamentalsSnapshot(
+                period_end=period_end,
+                report_date=date(2024, 5, 1),
+                revenue=1000,
+                free_cash_flow=10,
+                net_debt=5,
+                ebitda=20,
+                market_cap=42_000_000_000,
+            )
+        ],
+        source="yfinance",
+    )
+
+    ingest._store_fundamentals(
+        "AAPL",
+        [
+            FundamentalsSnapshot(
+                period_end=period_end,
+                report_date=date(2024, 5, 1),
+                revenue=1000,
+                free_cash_flow=10,
+                net_debt=5,
+                ebitda=20,
+                market_cap=None,  # e.g. a transient fetch failure this run
+            )
+        ],
+        source="yfinance",
+    )
+
+    with get_session() as session:
+        row = session.query(Fundamentals).filter_by(ticker="AAPL", period_end=period_end).one()
+        assert row.market_cap == 42_000_000_000
 
 
 def test_store_earnings_dedupes_within_same_batch(db):
