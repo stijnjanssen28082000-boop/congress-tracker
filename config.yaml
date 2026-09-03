@@ -22,6 +22,11 @@ ingest:
   # "yfinance" needs no API key and covers the whole universe (US + EU); "fmp"
   # requires a paid FMP plan since the free tier 403s on fundamentals endpoints.
   fundamentals_provider: "yfinance"
+  # How much price/FX history `ingest.py --full` keeps in the database that
+  # gets committed to git — well beyond the ~1 year signals/quality actually
+  # look back, but far short of full_history_years, so the committed database
+  # stays under GitHub's 100MB per-file push limit. See prune_old_prices().
+  price_retention_years: 2
 
 # --- Module 2: quality filter ---
 quality:

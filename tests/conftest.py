@@ -18,6 +18,7 @@ def db(tmp_path):
                 "full_history_years": 12,
                 "price_provider": "yfinance",
                 "fundamentals_provider": "yfinance",
+                "price_retention_years": 2,
             },
             "quality": {
                 "min_market_cap_eur": 30_000_000_000,
