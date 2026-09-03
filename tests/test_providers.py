@@ -1,9 +1,10 @@
-from datetime import date
+from datetime import date, timedelta
 
 import pandas as pd
 import pytest
 
 from stock_tracker.providers.fmp_provider import FMPProvider
+from stock_tracker.providers.yfinance_fundamentals_provider import YFinanceFundamentalsProvider
 from stock_tracker.providers.yfinance_provider import YFinanceProvider
 
 
@@ -56,6 +57,128 @@ def test_yfinance_provider_empty_history_returns_empty_list(mocker):
 
     provider = YFinanceProvider()
     assert provider.get_prices("AAPL", date(2024, 1, 2), date(2024, 1, 2)) == []
+
+
+def _mock_yf_fundamentals_ticker(mocker, income=None, balance=None, cashflow=None, market_cap=None):
+    mock_ticker = mocker.MagicMock()
+    mock_ticker.quarterly_income_stmt = income if income is not None else pd.DataFrame()
+    mock_ticker.quarterly_balance_sheet = balance if balance is not None else pd.DataFrame()
+    mock_ticker.quarterly_cashflow = cashflow if cashflow is not None else pd.DataFrame()
+    mock_ticker.fast_info = {"market_cap": market_cap}
+    mocker.patch(
+        "stock_tracker.providers.yfinance_fundamentals_provider.yf.Ticker",
+        return_value=mock_ticker,
+    )
+    return mock_ticker
+
+
+def test_yfinance_fundamentals_provider_get_fundamentals_direct_rows(mocker):
+    col = pd.Timestamp("2024-03-31")
+    income = pd.DataFrame({col: [1000.0, 200.0]}, index=["Total Revenue", "EBITDA"])
+    cashflow = pd.DataFrame({col: [50.0]}, index=["Free Cash Flow"])
+    balance = pd.DataFrame({col: [30.0]}, index=["Net Debt"])
+    _mock_yf_fundamentals_ticker(
+        mocker, income=income, balance=balance, cashflow=cashflow, market_cap=5_000_000_000
+    )
+
+    provider = YFinanceFundamentalsProvider()
+    snapshots = provider.get_fundamentals("AAPL")
+
+    assert len(snapshots) == 1
+    snap = snapshots[0]
+    assert snap.period_end == date(2024, 3, 31)
+    assert snap.report_date == date(2024, 3, 31) + timedelta(days=45)
+    assert snap.revenue == 1000.0
+    assert snap.free_cash_flow == 50.0
+    assert snap.net_debt == 30.0
+    assert snap.ebitda == 200.0
+    assert snap.market_cap == 5_000_000_000
+
+
+def test_yfinance_fundamentals_provider_get_fundamentals_computes_fallbacks(mocker):
+    col = pd.Timestamp("2024-03-31")
+    income = pd.DataFrame({col: [1000.0]}, index=["Total Revenue"])
+    cashflow = pd.DataFrame(
+        {col: [80.0, -20.0]}, index=["Operating Cash Flow", "Capital Expenditure"]
+    )
+    balance = pd.DataFrame(
+        {col: [100.0, 40.0]}, index=["Total Debt", "Cash And Cash Equivalents"]
+    )
+    _mock_yf_fundamentals_ticker(mocker, income=income, balance=balance, cashflow=cashflow)
+
+    provider = YFinanceFundamentalsProvider()
+    snapshots = provider.get_fundamentals("AAPL")
+
+    assert len(snapshots) == 1
+    assert snapshots[0].free_cash_flow == 60.0  # 80 + (-20)
+    assert snapshots[0].net_debt == 60.0  # 100 - 40
+
+
+def test_yfinance_fundamentals_provider_get_fundamentals_empty_returns_empty(mocker):
+    _mock_yf_fundamentals_ticker(mocker)
+    provider = YFinanceFundamentalsProvider()
+    assert provider.get_fundamentals("AAPL") == []
+
+
+def test_yfinance_fundamentals_provider_get_estimates(mocker):
+    mock_ticker = mocker.MagicMock()
+    mock_ticker.earnings_estimate = pd.DataFrame(
+        {"avg": [5.0, 6.0, 1.0]}, index=["0y", "+1y", "0q"]
+    )
+    mocker.patch(
+        "stock_tracker.providers.yfinance_fundamentals_provider.yf.Ticker",
+        return_value=mock_ticker,
+    )
+
+    provider = YFinanceFundamentalsProvider()
+    estimates = provider.get_estimates("AAPL")
+
+    today = date.today()
+    assert {(e.fiscal_year, e.eps_estimate) for e in estimates} == {
+        (today.year, 5.0),
+        (today.year + 1, 6.0),
+    }
+    assert all(e.as_of_date == today for e in estimates)
+
+
+def test_yfinance_fundamentals_provider_get_estimates_empty_table(mocker):
+    mock_ticker = mocker.MagicMock()
+    mock_ticker.earnings_estimate = pd.DataFrame()
+    mocker.patch(
+        "stock_tracker.providers.yfinance_fundamentals_provider.yf.Ticker",
+        return_value=mock_ticker,
+    )
+    provider = YFinanceFundamentalsProvider()
+    assert provider.get_estimates("AAPL") == []
+
+
+def test_yfinance_fundamentals_provider_get_earnings_calendar(mocker):
+    mock_ticker = mocker.MagicMock()
+    mock_ticker.get_earnings_dates.return_value = pd.DataFrame(
+        {"EPS Estimate": [1.5, 1.6]},
+        index=pd.to_datetime([date(2024, 4, 25), date(2024, 7, 25)]),
+    )
+    mocker.patch(
+        "stock_tracker.providers.yfinance_fundamentals_provider.yf.Ticker",
+        return_value=mock_ticker,
+    )
+
+    provider = YFinanceFundamentalsProvider()
+    events = provider.get_earnings_calendar("AAPL")
+
+    assert [e.earnings_date for e in events] == [date(2024, 4, 25), date(2024, 7, 25)]
+    assert all(e.confirmed for e in events)
+
+
+def test_yfinance_fundamentals_provider_get_earnings_calendar_empty(mocker):
+    mock_ticker = mocker.MagicMock()
+    mock_ticker.get_earnings_dates.return_value = pd.DataFrame()
+    mocker.patch(
+        "stock_tracker.providers.yfinance_fundamentals_provider.yf.Ticker",
+        return_value=mock_ticker,
+    )
+    provider = YFinanceFundamentalsProvider()
+    assert provider.get_earnings_calendar("AAPL") == []
 
 
 def test_fmp_provider_requires_api_key(monkeypatch):

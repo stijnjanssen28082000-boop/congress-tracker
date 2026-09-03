@@ -143,6 +143,30 @@ def test_run_daily_uses_fallback_start_when_no_prior_data(db, mocker):
     assert start == end.replace(year=end.year - db.ingest.full_history_years)
 
 
+def test_build_fundamentals_provider_yfinance(db):
+    provider = ingest._build_fundamentals_provider(db)
+    assert isinstance(provider, ingest.YFinanceFundamentalsProvider)
+
+
+def test_build_fundamentals_provider_fmp(db, monkeypatch):
+    monkeypatch.setenv("FMP_API_KEY", "test-key")
+    db._data["ingest"]["fundamentals_provider"] = "fmp"
+    provider = ingest._build_fundamentals_provider(db)
+    assert isinstance(provider, ingest.FMPProvider)
+
+
+def test_build_fundamentals_provider_fmp_without_key_returns_none(db, monkeypatch):
+    monkeypatch.delenv("FMP_API_KEY", raising=False)
+    db._data["ingest"]["fundamentals_provider"] = "fmp"
+    assert ingest._build_fundamentals_provider(db) is None
+
+
+def test_build_fundamentals_provider_rejects_unknown_name(db):
+    db._data["ingest"]["fundamentals_provider"] = "bogus"
+    with pytest.raises(ValueError):
+        ingest._build_fundamentals_provider(db)
+
+
 def test_main_requires_full_or_daily_flag():
     with pytest.raises(SystemExit):
         ingest.main([])
