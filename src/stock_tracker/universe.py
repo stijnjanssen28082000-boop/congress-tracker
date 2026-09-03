@@ -8,9 +8,11 @@ boundary around the network/parsing so `build_universe` and
 
 from __future__ import annotations
 
+import io
 import logging
 
 import pandas as pd
+import requests
 
 from stock_tracker.db.models import Ticker
 from stock_tracker.db.session import get_session
@@ -22,9 +24,19 @@ WIKI_EURONEXT100_URL = "https://en.wikipedia.org/wiki/Euronext_100"
 WIKI_AEX_URL = "https://en.wikipedia.org/wiki/AEX_index"
 WIKI_BEL20_URL = "https://en.wikipedia.org/wiki/BEL_20"
 
+# Wikipedia blocks plain urllib/pandas requests (no User-Agent) with a 403;
+# fetch the HTML ourselves via requests (which identifies as a browser) and
+# hand pandas the text instead of letting it open the URL itself.
+_USER_AGENT = (
+    "Mozilla/5.0 (compatible; stock-tracker/1.0; "
+    "+https://github.com/stijnjanssen28082000-boop/congress-tracker)"
+)
+
 
 def _read_first_matching_table(url: str, required_columns: list[str]) -> pd.DataFrame:
-    tables = pd.read_html(url)
+    response = requests.get(url, headers={"User-Agent": _USER_AGENT}, timeout=30)
+    response.raise_for_status()
+    tables = pd.read_html(io.StringIO(response.text))
     for table in tables:
         if all(col in table.columns for col in required_columns):
             return table
