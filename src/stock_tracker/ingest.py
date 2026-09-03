@@ -15,16 +15,18 @@ import logging
 from datetime import date, timedelta
 
 from dotenv import load_dotenv
+from sqlalchemy import text
 
 from stock_tracker.config import Config, load_config
 from stock_tracker.db.models import (
     AnalystEstimate,
     EarningsCalendar,
     Fundamentals,
+    FxRate,
     PriceDaily,
     Ticker,
 )
-from stock_tracker.db.session import get_session, init_db
+from stock_tracker.db.session import get_engine, get_session, init_db
 from stock_tracker.fx import convert_to_eur, fetch_fx_rates, store_fx_rates
 from stock_tracker.logging_setup import setup_logging
 from stock_tracker.providers.base import FundamentalsDataProvider, PriceDataProvider
@@ -85,7 +87,7 @@ def _ingest_prices_and_fx(
     return _store_prices(ticker_row.ticker, ticker_row.currency, bars)
 
 
-def _store_fundamentals(ticker: str, snapshots) -> int:
+def _store_fundamentals(ticker: str, snapshots, source: str) -> int:
     if not snapshots:
         return 0
     with get_session() as session:
@@ -97,8 +99,11 @@ def _store_fundamentals(ticker: str, snapshots) -> int:
         }
         stored = 0
         for snap in snapshots:
+            # Also guards against a provider returning the same period twice
+            # in one call, not just periods already stored from an earlier run.
             if snap.period_end in existing_periods:
                 continue
+            existing_periods.add(snap.period_end)
             session.add(
                 Fundamentals(
                     ticker=ticker,
@@ -109,14 +114,14 @@ def _store_fundamentals(ticker: str, snapshots) -> int:
                     net_debt=snap.net_debt,
                     ebitda=snap.ebitda,
                     market_cap=snap.market_cap,
-                    source="fmp",
+                    source=source,
                 )
             )
             stored += 1
     return stored
 
 
-def _store_estimates(ticker: str, estimates) -> int:
+def _store_estimates(ticker: str, estimates, source: str) -> int:
     if not estimates:
         return 0
     with get_session() as session:
@@ -130,22 +135,24 @@ def _store_estimates(ticker: str, estimates) -> int:
         }
         stored = 0
         for est in estimates:
-            if (est.as_of_date, est.fiscal_year) in existing_keys:
+            key = (est.as_of_date, est.fiscal_year)
+            if key in existing_keys:
                 continue
+            existing_keys.add(key)
             session.add(
                 AnalystEstimate(
                     ticker=ticker,
                     as_of_date=est.as_of_date,
                     fiscal_year=est.fiscal_year,
                     eps_estimate=est.eps_estimate,
-                    source="fmp",
+                    source=source,
                 )
             )
             stored += 1
     return stored
 
 
-def _store_earnings(ticker: str, events) -> int:
+def _store_earnings(ticker: str, events, source: str) -> int:
     if not events:
         return 0
     with get_session() as session:
@@ -157,14 +164,18 @@ def _store_earnings(ticker: str, events) -> int:
         }
         stored = 0
         for event in events:
+            # Some providers (e.g. yfinance) can return the same calendar
+            # date twice in one call — dedup against this batch too, not
+            # just against rows already stored from an earlier run.
             if event.earnings_date in existing_dates:
                 continue
+            existing_dates.add(event.earnings_date)
             session.add(
                 EarningsCalendar(
                     ticker=ticker,
                     earnings_date=event.earnings_date,
                     confirmed=event.confirmed,
-                    source="fmp",
+                    source=source,
                 )
             )
             stored += 1
@@ -186,14 +197,44 @@ def _build_fundamentals_provider(config: Config) -> FundamentalsDataProvider | N
     raise ValueError(f"Unknown ingest.fundamentals_provider: {provider_name!r}")
 
 
-def _refresh_fundamentals(ticker: str, provider: FundamentalsDataProvider, full: bool) -> None:
+def _refresh_fundamentals(
+    ticker: str, provider: FundamentalsDataProvider, full: bool, source: str
+) -> None:
     try:
         if full:
-            _store_fundamentals(ticker, provider.get_fundamentals(ticker))
-        _store_estimates(ticker, provider.get_estimates(ticker))
-        _store_earnings(ticker, provider.get_earnings_calendar(ticker))
+            _store_fundamentals(ticker, provider.get_fundamentals(ticker), source)
+        _store_estimates(ticker, provider.get_estimates(ticker), source)
+        _store_earnings(ticker, provider.get_earnings_calendar(ticker), source)
     except Exception:
         logger.exception("Fundamentals ingest failed for %s", ticker)
+
+
+def prune_old_prices(config: Config) -> dict[str, int]:
+    """Deletes price/FX history older than `ingest.price_retention_years` and
+    reclaims the freed disk space with `VACUUM`.
+
+    Live signal generation and the quality filter only ever look back about a
+    year (52-week high, SMA-50, RSI-14, 60-day average volume); the much
+    longer `full_history_years` window is for the backtester, which isn't
+    part of the automated cloud pipeline — it's a manual, occasional command.
+    Keeping the full window in the database that gets committed to git on
+    every run isn't needed for that, and blows past GitHub's 100MB per-file
+    push limit at this universe's size (a full 529-ticker/12-year database
+    hit ~146MB). Run `ingest.py --full` locally, or use the "Full ingest"
+    workflow's uploaded artifact, for a database with the complete history a
+    backtest needs.
+    """
+
+    cutoff = date.today() - timedelta(days=365 * config.ingest.price_retention_years)
+    with get_session(config) as session:
+        prices_deleted = session.query(PriceDaily).filter(PriceDaily.date < cutoff).delete()
+        fx_deleted = session.query(FxRate).filter(FxRate.date < cutoff).delete()
+
+    engine = get_engine(config)
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        connection.execute(text("VACUUM"))
+
+    return {"prices_deleted": prices_deleted, "fx_deleted": fx_deleted}
 
 
 def run_full(config: Config) -> None:
@@ -221,7 +262,20 @@ def run_full(config: Config) -> None:
             logger.exception("Price ingest failed for %s", ticker_row.ticker)
 
         if fundamentals_provider is not None:
-            _refresh_fundamentals(ticker_row.ticker, fundamentals_provider, full=True)
+            _refresh_fundamentals(
+                ticker_row.ticker,
+                fundamentals_provider,
+                full=True,
+                source=config.ingest.fundamentals_provider,
+            )
+
+    prune_result = prune_old_prices(config)
+    logger.info(
+        "Pruned %d price bar(s) and %d FX rate(s) older than %d year(s)",
+        prune_result["prices_deleted"],
+        prune_result["fx_deleted"],
+        config.ingest.price_retention_years,
+    )
 
 
 def run_daily(config: Config) -> None:
@@ -253,7 +307,12 @@ def run_daily(config: Config) -> None:
                 logger.exception("Price ingest failed for %s", ticker_row.ticker)
 
         if fundamentals_provider is not None:
-            _refresh_fundamentals(ticker_row.ticker, fundamentals_provider, full=False)
+            _refresh_fundamentals(
+                ticker_row.ticker,
+                fundamentals_provider,
+                full=False,
+                source=config.ingest.fundamentals_provider,
+            )
 
 
 def main(argv: list[str] | None = None) -> None:

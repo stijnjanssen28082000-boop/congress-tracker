@@ -3,7 +3,7 @@ from datetime import date, timedelta
 import pytest
 
 from stock_tracker import ingest
-from stock_tracker.db.models import PriceDaily, Ticker
+from stock_tracker.db.models import AnalystEstimate, EarningsCalendar, FxRate, PriceDaily, Ticker
 from stock_tracker.db.session import get_session
 from stock_tracker.providers.base import (
     EarningsEvent,
@@ -141,6 +141,83 @@ def test_run_daily_uses_fallback_start_when_no_prior_data(db, mocker):
 
     _, start, end = fake_provider.calls[0]
     assert start == end.replace(year=end.year - db.ingest.full_history_years)
+
+
+def test_store_earnings_dedupes_within_same_batch(db):
+    _seed_ticker()
+    same_date = date.today() + timedelta(days=10)
+    events = [
+        EarningsEvent(earnings_date=same_date, confirmed=True),
+        EarningsEvent(earnings_date=same_date, confirmed=True),
+    ]
+
+    stored = ingest._store_earnings("AAPL", events, source="yfinance")
+
+    assert stored == 1
+    with get_session() as session:
+        assert session.query(EarningsCalendar).filter_by(ticker="AAPL").count() == 1
+
+
+def test_run_full_stores_configured_provider_as_source(db, mocker):
+    _seed_ticker()
+    mocker.patch("stock_tracker.ingest.build_universe", return_value=[])
+    mocker.patch("stock_tracker.ingest.sync_universe_to_db", return_value=0)
+    mocker.patch("stock_tracker.ingest.YFinanceProvider", return_value=FakePriceProvider({}))
+    mocker.patch(
+        "stock_tracker.ingest._build_fundamentals_provider",
+        return_value=FakeFundamentalsProvider(),
+    )
+    assert db.ingest.fundamentals_provider == "yfinance"
+
+    ingest.run_full(db)
+
+    with get_session() as session:
+        estimate = session.query(AnalystEstimate).filter_by(ticker="AAPL").one()
+        earnings = session.query(EarningsCalendar).filter_by(ticker="AAPL").one()
+        assert estimate.source == "yfinance"
+        assert earnings.source == "yfinance"
+
+
+def test_prune_old_prices_deletes_old_rows_keeps_recent(db):
+    _seed_ticker(currency="USD")
+    old_date = date.today() - timedelta(days=365 * db.ingest.price_retention_years + 30)
+    recent_date = date.today() - timedelta(days=1)
+    with get_session() as session:
+        session.add_all(
+            [
+                PriceDaily(
+                    ticker="AAPL",
+                    date=old_date,
+                    open=1,
+                    high=1,
+                    low=1,
+                    close=1,
+                    volume=1,
+                    close_eur=1,
+                ),
+                PriceDaily(
+                    ticker="AAPL",
+                    date=recent_date,
+                    open=2,
+                    high=2,
+                    low=2,
+                    close=2,
+                    volume=2,
+                    close_eur=2,
+                ),
+                FxRate(date=old_date, currency="USD", rate_to_eur=0.9),
+                FxRate(date=recent_date, currency="USD", rate_to_eur=0.95),
+            ]
+        )
+
+    result = ingest.prune_old_prices(db)
+
+    assert result == {"prices_deleted": 1, "fx_deleted": 1}
+    with get_session() as session:
+        remaining_price_dates = {d for (d,) in session.query(PriceDaily.date).all()}
+        remaining_fx_dates = {d for (d,) in session.query(FxRate.date).all()}
+    assert remaining_price_dates == {recent_date}
+    assert remaining_fx_dates == {recent_date}
 
 
 def test_build_fundamentals_provider_yfinance(db):
