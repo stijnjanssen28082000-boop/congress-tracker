@@ -1,0 +1,13 @@
+# Used by Streamlit Community Cloud to install dependencies for app.py.
+# Kept in sync with pyproject.toml's [project.dependencies] — uv/local dev
+# still uses pyproject.toml + uv.lock; this file exists only for Streamlit
+# Cloud's deployment tooling.
+sqlalchemy>=2.0
+yfinance>=0.2.40
+requests>=2.32
+pyyaml>=6.0
+python-dotenv>=1.0
+pandas>=2.2
+numpy>=1.26
+streamlit>=1.38
+certifi>=2024.0.0

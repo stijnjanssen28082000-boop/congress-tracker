@@ -1,0 +1,68 @@
+name: Daily run
+
+on:
+  schedule:
+    # 06:00 UTC on weekdays ≈ 07:00 CET / 08:00 CEST — cron can't express CET
+    # with DST, so this drifts by an hour in summer. Adjust the "6" below
+    # seasonally if the exact wall-clock time matters.
+    - cron: "0 6 * * 1-5"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  run-daily:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      # data/tracker.db is gitignored for local dev (nobody wants to
+      # accidentally commit their own test database), but this workflow is
+      # the one place it's the source of truth: checkout above already gives
+      # us yesterday's committed copy for incremental ingest to build on,
+      # and the commit step below force-adds it (git add -f) despite the
+      # ignore rule so Streamlit Community Cloud's dashboard — which
+      # redeploys automatically on every push — always has today's data.
+      - name: Run daily pipeline
+        env:
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: uv run python -m stock_tracker.run_daily
+
+      - name: Commit updated database
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f data/tracker.db
+          git diff --cached --quiet && echo "No database changes to commit" || git commit -m "Daily data update $(date -u +%Y-%m-%d)"
+          git push
+
+      - name: Upload database as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tracker-db-${{ github.run_id }}
+          path: data/tracker.db
+          retention-days: 90
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ github.run_id }}
+          path: logs/
+          retention-days: 30
