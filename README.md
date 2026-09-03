@@ -275,14 +275,23 @@ uv run streamlit run app.py
   (win rate/gemiddelde winst vs. de laatste backtest-run) — gedetecteerd
   door het aantal gesloten trades vóór en ná de paper-fill te vergelijken,
   dus precies één keer, niet elke dag opnieuw.
-- **GitHub Actions** (`.github/workflows/daily.yml`): draait op
-  `0 6 * * 1-5` UTC (≈ 07:00 CET / 08:00 CEST — cron kent geen DST, dus dit
-  drift met een uur in de zomer). `data/tracker.db` overleeft runs via
-  `actions/cache/restore`+`restore-keys` (pakt de meest recente eerdere
-  cache-entry) en `actions/cache/save` onder een run-id-unieke key (zodat
-  saven nooit wordt overgeslagen); daarnaast wordt de database ook als
-  artifact geüpload (90 dagen bewaard), zoals de spec vraagt. Secrets:
-  `FMP_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
+- **GitHub Actions — dagelijkse run** (`.github/workflows/daily.yml`): draait
+  op `0 6 * * 1-5` UTC (≈ 07:00 CET / 08:00 CEST — cron kent geen DST, dus dit
+  drift met een uur in de zomer). `data/tracker.db` overleeft runs doordat de
+  workflow hem na elke run terugcommit naar de branch (`git add -f` ondanks
+  de `.gitignore`-regel) — zo heeft Streamlit Community Cloud, dat automatisch
+  herdeployt bij elke push, altijd de nieuwste data; daarnaast wordt de
+  database ook als artifact geüpload (90 dagen bewaard). Secrets:
+  `FMP_API_KEY` (optioneel, alleen nodig bij `fundamentals_provider: "fmp"`),
+  `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
+- **GitHub Actions — volledige ingest** (`.github/workflows/full-ingest.yml`):
+  `ingest.run_daily` (aangeroepen door de dagelijkse run hierboven) haalt
+  bewust **geen** kwartaalcijfers op — die veranderen maar 4x per jaar, dus
+  dat is het werk van `ingest.py --full`. Deze aparte workflow draait dat
+  maandelijks (`0 6 1 * *` UTC) en is ook handmatig te starten via
+  "Run workflow" — nodig na het opzetten van het project, of wanneer je wilt
+  dat de fundamentals-tabel meteen gevuld wordt in plaats van te wachten op
+  de eerstvolgende maandelijkse run.
 - **Lokaal via cron**: `scripts/run_daily_cron.sh` (voegt geen restore/save
   toe — het bestand staat al lokaal op schijf). Voorbeeld crontab-regel
   staat in het script zelf.
