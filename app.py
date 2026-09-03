@@ -19,13 +19,14 @@ from stock_tracker.config import load_config
 from stock_tracker.db.models import EarningsCalendar, Journal, PriceDaily, Ticker, TradePaper
 from stock_tracker.db.models import Signal as SignalModel
 from stock_tracker.db.session import get_session, init_db
-from stock_tracker.quality import get_eligible_tickers
+from stock_tracker.quality import get_eligible_tickers, get_eligible_tickers_with_grace
 
 # --- data loading (no Streamlit calls — importable/testable on their own) ----
 
 
 def load_watchlist(as_of: date, config) -> pd.DataFrame:
     tickers = get_eligible_tickers(as_of)
+    grace_by_ticker = get_eligible_tickers_with_grace(as_of)
     rows = []
     with get_session() as session:
         for ticker in tickers:
@@ -43,6 +44,11 @@ def load_watchlist(as_of: date, config) -> pd.DataFrame:
             rows.append(
                 {
                     "Ticker": ticker,
+                    "Status": (
+                        "Voorlopig (5/6 — EPS-trend nog niet meetbaar)"
+                        if grace_by_ticker.get(ticker)
+                        else "Volledig (6/6)"
+                    ),
                     "Koers": round(ind.close, 2),
                     "Afstand SMA50 %": (
                         round(sma_distance_pct, 2) if sma_distance_pct is not None else None
@@ -241,6 +247,11 @@ def main() -> None:
 
     with tab_watchlist:
         st.subheader("Eligible tickers")
+        st.caption(
+            "**Voorlopig (5/6)**: alle criteria behalve de EPS-schatting-trend zijn "
+            "gehaald — die kan pas écht beoordeeld worden zodra er ~90 dagen aan "
+            "geschiedenis is opgebouwd. Geen aanbeveling, wel een startpunt om te volgen."
+        )
         as_of = st.date_input("Datum", value=date.today(), key="watchlist_date")
         df = load_watchlist(as_of, config)
         if df.empty:

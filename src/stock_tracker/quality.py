@@ -46,6 +46,11 @@ class QualityResult:
     eps_estimate_trend_pass: bool
     avg_daily_volume: float | None
     volume_pass: bool
+    # True when eps_estimate_trend_pass is failing only because no estimate
+    # snapshot old enough to compare against exists yet (not because the
+    # estimate is actually trending down) and config.quality allows treating
+    # that as a grace case rather than a hard fail. See config.yaml comment.
+    eps_estimate_trend_grace: bool = False
 
     @property
     def score(self) -> int:
@@ -62,7 +67,9 @@ class QualityResult:
 
     @property
     def eligible(self) -> bool:
-        return self.score == _CRITERIA_COUNT
+        if self.score == _CRITERIA_COUNT:
+            return True
+        return self.score == _CRITERIA_COUNT - 1 and self.eps_estimate_trend_grace
 
 
 def latest_estimate(
@@ -176,6 +183,11 @@ def compute_quality(
         and eps_estimate_prior is not None
         and eps_estimate_current > eps_estimate_prior
     )
+    eps_estimate_trend_grace = (
+        quality_cfg.get("eps_estimate_trend_grace_when_no_history", False)
+        and eps_estimate_current is not None
+        and eps_estimate_prior is None
+    )
 
     avg_daily_volume = _average_volume(
         session, ticker_row.ticker, as_of, quality_cfg.avg_volume_lookback_days
@@ -199,6 +211,7 @@ def compute_quality(
         eps_estimate_trend_pass=eps_estimate_trend_pass,
         avg_daily_volume=avg_daily_volume,
         volume_pass=volume_pass,
+        eps_estimate_trend_grace=eps_estimate_trend_grace,
     )
 
 
@@ -252,22 +265,44 @@ def store_quality_scores(results: list[QualityResult]) -> int:
     return stored
 
 
+def _latest_quality_snapshots(session: Session, as_of: date) -> dict[str, QualityScore]:
+    rows = (
+        session.query(QualityScore)
+        .filter(QualityScore.date <= as_of)
+        .order_by(QualityScore.ticker, QualityScore.date.desc())
+        .all()
+    )
+    latest_by_ticker: dict[str, QualityScore] = {}
+    for row in rows:
+        latest_by_ticker.setdefault(row.ticker, row)
+    return latest_by_ticker
+
+
 def get_eligible_tickers(as_of: date) -> list[str]:
     """Returns eligible tickers using each ticker's most recently computed
     quality snapshot on or before `as_of` — quality only recomputes weekly,
     but callers (e.g. the signal engine) need an answer for every trading day."""
 
     with get_session() as session:
-        rows = (
-            session.query(QualityScore)
-            .filter(QualityScore.date <= as_of)
-            .order_by(QualityScore.ticker, QualityScore.date.desc())
-            .all()
-        )
-    latest_by_ticker: dict[str, QualityScore] = {}
-    for row in rows:
-        latest_by_ticker.setdefault(row.ticker, row)
+        latest_by_ticker = _latest_quality_snapshots(session, as_of)
     return sorted(ticker for ticker, row in latest_by_ticker.items() if row.eligible)
+
+
+def get_eligible_tickers_with_grace(as_of: date) -> dict[str, bool]:
+    """Same set as `get_eligible_tickers`, but maps each ticker to whether it
+    only qualifies via the EPS-estimate-trend grace period (see config.yaml)
+    rather than genuinely passing all 6 criteria — i.e. `eligible` is True,
+    but the trend itself couldn't actually be evaluated yet (no estimate
+    snapshot old enough exists). Callers presenting these to a user should
+    mark them distinctly rather than as a full 6/6 pass."""
+
+    with get_session() as session:
+        latest_by_ticker = _latest_quality_snapshots(session, as_of)
+    return {
+        ticker: (row.eps_estimate_prior is None and row.eps_estimate_current is not None)
+        for ticker, row in latest_by_ticker.items()
+        if row.eligible
+    }
 
 
 def run_for_date(as_of: date, config: Config | None = None) -> int:

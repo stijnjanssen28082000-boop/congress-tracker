@@ -98,6 +98,42 @@ def test_load_watchlist_empty_without_eligible_tickers(db):
     assert df.empty
 
 
+def test_load_watchlist_marks_full_pass_as_volledig(db):
+    _seed_ticker()
+    _seed_eligible("AAPL", AS_OF)
+    _seed_prices("AAPL", AS_OF, 60, baseline=100, today_close=70)
+
+    df = app.load_watchlist(AS_OF, db)
+
+    assert df.iloc[0]["Status"] == "Volledig (6/6)"
+
+
+def test_load_watchlist_marks_grace_period_tickers_as_voorlopig(db):
+    _seed_ticker()
+    with get_session() as session:
+        session.add(
+            QualityScore(
+                ticker="AAPL",
+                date=AS_OF,
+                score=5,
+                eligible=True,
+                market_cap_pass=True,
+                fcf_positive_pass=True,
+                revenue_growth_pass=True,
+                net_debt_ebitda_pass=True,
+                eps_estimate_trend_pass=False,
+                eps_estimate_current=6.0,
+                eps_estimate_prior=None,
+                volume_pass=True,
+            )
+        )
+    _seed_prices("AAPL", AS_OF, 60, baseline=100, today_close=70)
+
+    df = app.load_watchlist(AS_OF, db)
+
+    assert df.iloc[0]["Status"] == "Voorlopig (5/6 — EPS-trend nog niet meetbaar)"
+
+
 def test_load_signals_for_date(db):
     _seed_ticker()
     with get_session() as session:
