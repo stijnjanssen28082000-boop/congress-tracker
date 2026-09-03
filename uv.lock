@@ -1348,6 +1348,7 @@ name = "stock-tracker"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "certifi" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "python-dotenv" },
@@ -1367,6 +1368,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "certifi", specifier = ">=2024.0.0" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pandas", specifier = ">=2.2" },
     { name = "python-dotenv", specifier = ">=1.0" },
