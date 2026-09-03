@@ -65,11 +65,36 @@ class YFinanceFundamentalsProvider(FundamentalsDataProvider):
         return yf.Ticker(ticker)
 
     def _current_market_cap(self, yf_ticker: yf.Ticker) -> float | None:
+        # yfinance's FastInfo has been inconsistent across versions about
+        # whether it's addressed by snake_case attribute (`.market_cap`),
+        # camelCase dict key (`["marketCap"]`), or snake_case dict key
+        # (`.get("market_cap")`) — try all three before giving up, since
+        # silently returning None here fails the market-cap criterion for
+        # every ticker regardless of its actual size.
+        fast_info = yf_ticker.fast_info
+        for accessor in (
+            lambda: fast_info.market_cap,
+            lambda: fast_info["marketCap"],
+            lambda: fast_info.get("marketCap"),
+            lambda: fast_info.get("market_cap"),
+        ):
+            try:
+                value = accessor()
+            except Exception:
+                continue
+            if value is not None:
+                return float(value)
+
+        # Last resort: derive it from shares outstanding * last price, both
+        # of which FastInfo exposes more reliably than market_cap itself.
         try:
-            value = yf_ticker.fast_info.get("market_cap")
-            return float(value) if value is not None else None
+            shares = fast_info.get("shares")
+            last_price = fast_info.get("lastPrice") or fast_info.get("last_price")
+            if shares is not None and last_price is not None:
+                return float(shares) * float(last_price)
         except Exception:
-            return None
+            pass
+        return None
 
     def get_fundamentals(self, ticker: str) -> list[FundamentalsSnapshot]:
         yf_ticker = self._ticker(ticker)

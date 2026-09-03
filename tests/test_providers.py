@@ -114,6 +114,95 @@ def test_yfinance_fundamentals_provider_get_fundamentals_computes_fallbacks(mock
     assert snapshots[0].net_debt == 60.0  # 100 - 40
 
 
+class _AttrFastInfo:
+    """Stubs yfinance's FastInfo attribute-style access (`.market_cap`)."""
+
+    def __init__(self, market_cap):
+        self.market_cap = market_cap
+
+
+class _CamelCaseDictFastInfo(dict):
+    """Stubs FastInfo dict-style access under the camelCase key, with no
+    `.market_cap` attribute — forces the accessor chain past attribute
+    access and the `["marketCap"]` getitem before landing on `.get(...)`."""
+
+
+def test_yfinance_fundamentals_provider_market_cap_via_attribute(mocker):
+    col = pd.Timestamp("2024-03-31")
+    income = pd.DataFrame({col: [1000.0]}, index=["Total Revenue"])
+    mock_ticker = mocker.MagicMock()
+    mock_ticker.quarterly_income_stmt = income
+    mock_ticker.quarterly_balance_sheet = pd.DataFrame()
+    mock_ticker.quarterly_cashflow = pd.DataFrame()
+    mock_ticker.fast_info = _AttrFastInfo(7_000_000_000)
+    mocker.patch(
+        "stock_tracker.providers.yfinance_fundamentals_provider.yf.Ticker",
+        return_value=mock_ticker,
+    )
+
+    provider = YFinanceFundamentalsProvider()
+    snapshots = provider.get_fundamentals("AAPL")
+
+    assert snapshots[0].market_cap == 7_000_000_000
+
+
+def test_yfinance_fundamentals_provider_market_cap_via_camelcase_key(mocker):
+    col = pd.Timestamp("2024-03-31")
+    income = pd.DataFrame({col: [1000.0]}, index=["Total Revenue"])
+    mock_ticker = mocker.MagicMock()
+    mock_ticker.quarterly_income_stmt = income
+    mock_ticker.quarterly_balance_sheet = pd.DataFrame()
+    mock_ticker.quarterly_cashflow = pd.DataFrame()
+    mock_ticker.fast_info = _CamelCaseDictFastInfo(marketCap=8_000_000_000)
+    mocker.patch(
+        "stock_tracker.providers.yfinance_fundamentals_provider.yf.Ticker",
+        return_value=mock_ticker,
+    )
+
+    provider = YFinanceFundamentalsProvider()
+    snapshots = provider.get_fundamentals("AAPL")
+
+    assert snapshots[0].market_cap == 8_000_000_000
+
+
+def test_yfinance_fundamentals_provider_market_cap_falls_back_to_shares_times_price(mocker):
+    col = pd.Timestamp("2024-03-31")
+    income = pd.DataFrame({col: [1000.0]}, index=["Total Revenue"])
+    mock_ticker = mocker.MagicMock()
+    mock_ticker.quarterly_income_stmt = income
+    mock_ticker.quarterly_balance_sheet = pd.DataFrame()
+    mock_ticker.quarterly_cashflow = pd.DataFrame()
+    mock_ticker.fast_info = {"shares": 1000.0, "lastPrice": 50.0}
+    mocker.patch(
+        "stock_tracker.providers.yfinance_fundamentals_provider.yf.Ticker",
+        return_value=mock_ticker,
+    )
+
+    provider = YFinanceFundamentalsProvider()
+    snapshots = provider.get_fundamentals("AAPL")
+
+    assert snapshots[0].market_cap == 50_000.0
+
+
+def test_yfinance_fundamentals_provider_market_cap_none_when_unavailable(mocker):
+    col = pd.Timestamp("2024-03-31")
+    income = pd.DataFrame({col: [1000.0]}, index=["Total Revenue"])
+    mock_ticker = mocker.MagicMock()
+    mock_ticker.quarterly_income_stmt = income
+    mock_ticker.quarterly_balance_sheet = pd.DataFrame()
+    mock_ticker.quarterly_cashflow = pd.DataFrame()
+    mock_ticker.fast_info = {}
+    mocker.patch(
+        "stock_tracker.providers.yfinance_fundamentals_provider.yf.Ticker",
+        return_value=mock_ticker,
+    )
+
+    provider = YFinanceFundamentalsProvider()
+    snapshots = provider.get_fundamentals("AAPL")
+
+    assert snapshots[0].market_cap is None
+
+
 def test_yfinance_fundamentals_provider_get_fundamentals_empty_returns_empty(mocker):
     _mock_yf_fundamentals_ticker(mocker)
     provider = YFinanceFundamentalsProvider()
