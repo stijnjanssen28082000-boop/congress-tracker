@@ -9,7 +9,7 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   run-daily:
@@ -28,20 +28,13 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      # data/tracker.db needs to persist across runs for incremental ingest,
-      # quality history and open paper positions. actions/cache's
-      # restore-keys fall back to the most recent previous entry matching
-      # the prefix; saving under a run-id-unique key means the save step
-      # always executes (a plain `actions/cache` skips saving on an exact
-      # key hit, which would otherwise never happen here).
-      - name: Restore database
-        uses: actions/cache/restore@v4
-        with:
-          path: data/tracker.db
-          key: tracker-db-${{ github.run_id }}
-          restore-keys: |
-            tracker-db-
-
+      # data/tracker.db is gitignored for local dev (nobody wants to
+      # accidentally commit their own test database), but this workflow is
+      # the one place it's the source of truth: checkout above already gives
+      # us yesterday's committed copy for incremental ingest to build on,
+      # and the commit step below force-adds it (git add -f) despite the
+      # ignore rule so Streamlit Community Cloud's dashboard — which
+      # redeploys automatically on every push — always has today's data.
       - name: Run daily pipeline
         env:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
@@ -49,12 +42,14 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: uv run python -m stock_tracker.run_daily
 
-      - name: Save database
+      - name: Commit updated database
         if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: data/tracker.db
-          key: tracker-db-${{ github.run_id }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f data/tracker.db
+          git diff --cached --quiet && echo "No database changes to commit" || git commit -m "Daily data update $(date -u +%Y-%m-%d)"
+          git push
 
       - name: Upload database as artifact
         if: always()
