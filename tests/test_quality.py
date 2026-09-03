@@ -176,6 +176,91 @@ def test_revenue_growth_requires_eight_quarters(db):
     assert result.revenue_growth_pass is False
 
 
+def test_revenue_growth_falls_back_to_yoy_with_five_quarters(db):
+    _seed_ticker()
+    _seed_fundamentals("AAPL", FUNDAMENTALS_ALL_PASS[:5])
+    _seed_estimate("AAPL", date(2024, 1, 10), 2025, 5.0)
+    _seed_estimate("AAPL", date(2024, 5, 15), 2025, 6.0)
+    _seed_prices("AAPL", AS_OF, 60, 1_000_000)
+
+    result = _compute()
+
+    # Most recent quarter (1100) vs the same quarter a year prior (900).
+    assert result.revenue_growth_ttm_pct == pytest.approx((1100 / 900 - 1) * 100)
+    assert result.revenue_growth_pass is True
+
+
+def test_revenue_growth_prefers_eight_quarter_ttm_over_fallback(db):
+    _seed_all_pass()
+    result = _compute()
+
+    # With all 8 quarters present, uses trailing-twelve-month, not the
+    # 5-quarter YoY fallback (which would give a different number here).
+    ttm_now = sum(r[2] for r in _FUNDAMENTALS_ROWS[:4])
+    ttm_prior = sum(r[2] for r in _FUNDAMENTALS_ROWS[4:8])
+    assert result.revenue_growth_ttm_pct == pytest.approx((ttm_now / ttm_prior - 1) * 100)
+
+
+def test_eps_estimate_trend_grace_makes_ticker_eligible_without_prior_history(db):
+    _seed_ticker()
+    _seed_fundamentals("AAPL", FUNDAMENTALS_ALL_PASS)
+    _seed_estimate("AAPL", date(2024, 5, 15), 2025, 6.0)  # current only, no 90-day-old snapshot
+    _seed_prices("AAPL", AS_OF, 60, 1_000_000)
+
+    result = _compute()
+
+    assert result.eps_estimate_current == 6.0
+    assert result.eps_estimate_prior is None
+    assert result.eps_estimate_trend_pass is False
+    assert result.eps_estimate_trend_grace is True
+    assert result.score == 5
+    assert result.eligible is True
+
+
+def test_eps_estimate_trend_grace_disabled_by_config(db):
+    _seed_ticker()
+    _seed_fundamentals("AAPL", FUNDAMENTALS_ALL_PASS)
+    _seed_estimate("AAPL", date(2024, 5, 15), 2025, 6.0)
+    _seed_prices("AAPL", AS_OF, 60, 1_000_000)
+
+    config = load_config()
+    config._data["quality"]["eps_estimate_trend_grace_when_no_history"] = False
+    result = _compute(config=config)
+
+    assert result.eps_estimate_trend_grace is False
+    assert result.eligible is False
+
+
+def test_eps_estimate_trend_grace_does_not_apply_with_zero_coverage(db):
+    _seed_ticker()
+    _seed_fundamentals("AAPL", FUNDAMENTALS_ALL_PASS)
+    _seed_prices("AAPL", AS_OF, 60, 1_000_000)
+    # No analyst estimates seeded at all.
+
+    result = _compute()
+
+    assert result.eps_estimate_current is None
+    assert result.eps_estimate_trend_grace is False
+    assert result.eligible is False
+
+
+def test_eps_estimate_trend_grace_does_not_override_other_failing_criteria(db):
+    _seed_ticker()
+    _seed_fundamentals("AAPL", FUNDAMENTALS_ALL_PASS)
+    _seed_estimate("AAPL", date(2024, 5, 15), 2025, 6.0)
+    _seed_prices("AAPL", AS_OF, 60, 1_000_000)
+    with get_session() as session:
+        session.query(Fundamentals).filter_by(
+            ticker="AAPL", period_end=date(2024, 3, 31)
+        ).one().market_cap = 20_000_000_000
+
+    result = _compute()
+
+    assert result.eps_estimate_trend_grace is True
+    assert result.market_cap_pass is False
+    assert result.eligible is False
+
+
 def test_net_debt_to_ebitda_above_threshold_fails(db):
     _seed_all_pass()
     with get_session() as session:

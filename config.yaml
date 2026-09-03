@@ -36,6 +36,18 @@ quality:
   min_avg_daily_volume: 500_000
   avg_volume_lookback_days: 60  # trading days, not calendar days
   eps_estimate_lookback_days: 90
+  # The EPS-estimate-trend criterion compares today's consensus estimate to
+  # one from eps_estimate_lookback_days ago. Right after first setting up
+  # the tracker there simply is no estimate that old yet — nobody has been
+  # ingesting data for 90 days. When true, a ticker with a current estimate
+  # but no prior one yet is given the benefit of the doubt on this ONE
+  # criterion instead of being hard-failed by a data gap that isn't its
+  # fault; the other 5 criteria still apply in full. Once real 90-day-old
+  # history exists, this stops applying automatically — it only ever
+  # affects tickers where that history doesn't exist yet. The dashboard
+  # marks any ticker relying on this grace period as "voorlopig" (dashboard
+  # column). Set to false for strict 6/6-always behavior.
+  eps_estimate_trend_grace_when_no_history: true
   recompute_weekday: "Monday"
 
 # --- Module 3: signal engine ---

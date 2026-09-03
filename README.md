@@ -142,6 +142,18 @@ uv run streamlit run app.py
   (default maandag) in een periode — nodig om na `ingest.py --full` de
   historie te vullen zodat de walk-forward backtest (Module 4) niet met
   look-ahead werkt.
+- **Startprobleem EPS-trend-criterium**: dat criterium vergelijkt de huidige
+  analistenschatting met die van `eps_estimate_lookback_days` (90) dagen
+  geleden — vlak na het opzetten van de tracker bestaat die geschiedenis
+  simpelweg nog niet. Met `quality.eps_estimate_trend_grace_when_no_history:
+  true` (standaard aan) krijgt een ticker die alle overige 5 criteria haalt,
+  maar waarvoor alleen dit ene criterium nog niet te meten is (wel een
+  actuele schatting, geen 90-dagen-oude), toch `eligible=True` — maar
+  `quality_scores.score` blijft eerlijk op 5 staan, en het dashboard
+  (Watchlist-tab) toont zo'n ticker expliciet als "Voorlopig (5/6)" i.p.v.
+  als een volwaardige 6/6-match. Zodra er wél 90 dagen geschiedenis is,
+  geldt het criterium weer keihard. Zet op `false` voor altijd-strikt
+  6/6-gedrag.
 
 ### Module 3 — Signaal-engine
 

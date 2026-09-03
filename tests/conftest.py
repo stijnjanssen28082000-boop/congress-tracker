@@ -27,6 +27,7 @@ def db(tmp_path):
                 "min_avg_daily_volume": 500_000,
                 "avg_volume_lookback_days": 60,
                 "eps_estimate_lookback_days": 90,
+                "eps_estimate_trend_grace_when_no_history": True,
                 "recompute_weekday": "Monday",
             },
             "signals": {
