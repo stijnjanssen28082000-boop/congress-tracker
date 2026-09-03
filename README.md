@@ -23,7 +23,6 @@ Vereisten: Python 3.12, [`uv`](https://docs.astral.sh/uv/).
 ```bash
 uv sync --dev
 cp .env.example .env
-# vul FMP_API_KEY in .env in
 ```
 
 ## Configuratie
@@ -31,8 +30,20 @@ cp .env.example .env
 Alle drempels, percentages en universum-filters staan in `config.yaml`. Nooit
 hardcoded in code — pas de strategie aan door dit bestand te wijzigen.
 
-API-keys (Financial Modeling Prep, later Telegram) staan in `.env`, niet in
-`config.yaml`. Kopieer `.env.example` naar `.env` en vul ze in.
+`ingest.fundamentals_provider` in `config.yaml` kiest de bron voor
+fundamentals/analistenschattingen/winstkalender:
+- `"yfinance"` (standaard) — gratis, geen API-key nodig, dekt zowel VS- als
+  Europese tickers. Gebruikt dezelfde bron als de koersdata. Kanttekening:
+  `report_date` en `market_cap` zijn benaderingen (zie de docstring in
+  `src/stock_tracker/providers/yfinance_fundamentals_provider.py`), en
+  analistenschattingen kunnen een jaartje verschuiven bij bedrijven met een
+  afwijkend boekjaar.
+- `"fmp"` — nauwkeuriger en met een echte filing-datum, maar de gratis FMP-tier
+  geeft `403 Forbidden` op de fundamentals-endpoints; hiervoor is een betaald
+  FMP-abonnement nodig. Vereist `FMP_API_KEY` in `.env` (zie `.env.example`).
+
+API-keys (Financial Modeling Prep, Telegram) staan in `.env`, niet in
+`config.yaml`. Kopieer `.env.example` naar `.env` en vul ze in indien nodig.
 
 ## Database
 

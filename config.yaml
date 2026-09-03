@@ -19,7 +19,9 @@ universe:
 ingest:
   full_history_years: 12
   price_provider: "yfinance"
-  fundamentals_provider: "fmp"
+  # "yfinance" needs no API key and covers the whole universe (US + EU); "fmp"
+  # requires a paid FMP plan since the free tier 403s on fundamentals endpoints.
+  fundamentals_provider: "yfinance"
 
 # --- Module 2: quality filter ---
 quality:

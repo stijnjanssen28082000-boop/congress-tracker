@@ -29,6 +29,7 @@ from stock_tracker.fx import convert_to_eur, fetch_fx_rates, store_fx_rates
 from stock_tracker.logging_setup import setup_logging
 from stock_tracker.providers.base import FundamentalsDataProvider, PriceDataProvider
 from stock_tracker.providers.fmp_provider import FMPProvider
+from stock_tracker.providers.yfinance_fundamentals_provider import YFinanceFundamentalsProvider
 from stock_tracker.providers.yfinance_provider import YFinanceProvider
 from stock_tracker.universe import build_universe, sync_universe_to_db
 
@@ -170,12 +171,19 @@ def _store_earnings(ticker: str, events) -> int:
     return stored
 
 
-def _build_fundamentals_provider() -> FundamentalsDataProvider | None:
-    try:
-        return FMPProvider()
-    except ValueError:
-        logger.warning("FMP_API_KEY not set — skipping fundamentals/estimates/earnings ingest")
-        return None
+def _build_fundamentals_provider(config: Config) -> FundamentalsDataProvider | None:
+    provider_name = config.ingest.fundamentals_provider
+    if provider_name == "yfinance":
+        return YFinanceFundamentalsProvider()
+    if provider_name == "fmp":
+        try:
+            return FMPProvider()
+        except ValueError:
+            logger.warning(
+                "FMP_API_KEY not set — skipping fundamentals/estimates/earnings ingest"
+            )
+            return None
+    raise ValueError(f"Unknown ingest.fundamentals_provider: {provider_name!r}")
 
 
 def _refresh_fundamentals(ticker: str, provider: FundamentalsDataProvider, full: bool) -> None:
@@ -197,7 +205,7 @@ def run_full(config: Config) -> None:
     logger.info("Universe synced: %d tickers", len(universe))
 
     price_provider = YFinanceProvider()
-    fundamentals_provider = _build_fundamentals_provider()
+    fundamentals_provider = _build_fundamentals_provider(config)
 
     end = date.today() - timedelta(days=1)
     start = end.replace(year=end.year - config.ingest.full_history_years)
@@ -224,7 +232,7 @@ def run_daily(config: Config) -> None:
     sync_universe_to_db(universe)
 
     price_provider = YFinanceProvider()
-    fundamentals_provider = _build_fundamentals_provider()
+    fundamentals_provider = _build_fundamentals_provider(config)
 
     end = date.today() - timedelta(days=1)
     fallback_start = end.replace(year=end.year - config.ingest.full_history_years)
