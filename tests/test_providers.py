@@ -26,6 +26,29 @@ def test_yfinance_provider_get_prices(mocker):
     assert bars[0].currency == "USD"
 
 
+def test_yfinance_provider_skips_rows_with_missing_ohlc(mocker):
+    fake_history = pd.DataFrame(
+        {
+            "Open": [10.0, float("nan")],
+            "High": [11.0, float("nan")],
+            "Low": [9.5, float("nan")],
+            "Close": [10.5, float("nan")],
+            "Volume": [1000, 0],
+        },
+        index=pd.to_datetime([date(2024, 1, 2), date(2024, 1, 3)]),
+    )
+    mock_ticker = mocker.MagicMock()
+    mock_ticker.history.return_value = fake_history
+    mock_ticker.fast_info = {"currency": "USD"}
+    mocker.patch("stock_tracker.providers.yfinance_provider.yf.Ticker", return_value=mock_ticker)
+
+    provider = YFinanceProvider()
+    bars = provider.get_prices("EBAY", date(2024, 1, 2), date(2024, 1, 3))
+
+    assert len(bars) == 1
+    assert bars[0].date == date(2024, 1, 2)
+
+
 def test_yfinance_provider_empty_history_returns_empty_list(mocker):
     mock_ticker = mocker.MagicMock()
     mock_ticker.history.return_value = pd.DataFrame()
