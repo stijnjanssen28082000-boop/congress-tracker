@@ -33,24 +33,40 @@ _USER_AGENT = (
 )
 
 
-def _read_first_matching_table(url: str, required_columns: list[str]) -> pd.DataFrame:
+def _read_first_matching_table(
+    url: str, ticker_col: str, name_col_candidates: list[str]
+) -> tuple[pd.DataFrame, str]:
+    """Returns the first table containing `ticker_col` plus one of
+    `name_col_candidates`, and which of those name columns matched.
+
+    Wikipedia's index-constituent pages aren't all built from the same
+    template — the company-name column is "Company" on some pages and "Name"
+    on others — so multiple candidates are tried instead of a single fixed
+    column.
+    """
+
     response = requests.get(url, headers={"User-Agent": _USER_AGENT}, timeout=30)
     response.raise_for_status()
     tables = pd.read_html(io.StringIO(response.text))
     for table in tables:
-        if all(col in table.columns for col in required_columns):
-            return table
-    raise ValueError(f"No table with columns {required_columns} found at {url}")
+        if ticker_col not in table.columns:
+            continue
+        for name_col in name_col_candidates:
+            if name_col in table.columns:
+                return table, name_col
+    raise ValueError(
+        f"No table with column {ticker_col!r} and one of {name_col_candidates} found at {url}"
+    )
 
 
 def fetch_sp500() -> list[dict]:
-    table = _read_first_matching_table(WIKI_SP500_URL, ["Symbol", "Security"])
+    table, name_col = _read_first_matching_table(WIKI_SP500_URL, "Symbol", ["Security"])
     entries = []
     for _, row in table.iterrows():
         entries.append(
             {
                 "ticker": str(row["Symbol"]).replace(".", "-"),
-                "name": str(row["Security"]),
+                "name": str(row[name_col]),
                 "exchange": "US",
                 "currency": "USD",
                 "sector": row.get("GICS Sector"),
@@ -61,13 +77,15 @@ def fetch_sp500() -> list[dict]:
 
 
 def fetch_euronext100() -> list[dict]:
-    table = _read_first_matching_table(WIKI_EURONEXT100_URL, ["Ticker", "Company"])
+    table, name_col = _read_first_matching_table(
+        WIKI_EURONEXT100_URL, "Ticker", ["Company", "Name"]
+    )
     entries = []
     for _, row in table.iterrows():
         entries.append(
             {
                 "ticker": str(row["Ticker"]),
-                "name": str(row["Company"]),
+                "name": str(row[name_col]),
                 "exchange": "Euronext",
                 "currency": "EUR",
                 "sector": row.get("ICB Sector") or row.get("Sector"),
@@ -78,13 +96,13 @@ def fetch_euronext100() -> list[dict]:
 
 
 def fetch_aex() -> list[dict]:
-    table = _read_first_matching_table(WIKI_AEX_URL, ["Ticker", "Company"])
+    table, name_col = _read_first_matching_table(WIKI_AEX_URL, "Ticker", ["Company", "Name"])
     entries = []
     for _, row in table.iterrows():
         entries.append(
             {
                 "ticker": str(row["Ticker"]),
-                "name": str(row["Company"]),
+                "name": str(row[name_col]),
                 "exchange": "Euronext Amsterdam",
                 "currency": "EUR",
                 "sector": row.get("Sector") or row.get("ICB Sector"),
@@ -95,13 +113,13 @@ def fetch_aex() -> list[dict]:
 
 
 def fetch_bel20() -> list[dict]:
-    table = _read_first_matching_table(WIKI_BEL20_URL, ["Ticker", "Company"])
+    table, name_col = _read_first_matching_table(WIKI_BEL20_URL, "Ticker", ["Company", "Name"])
     entries = []
     for _, row in table.iterrows():
         entries.append(
             {
                 "ticker": str(row["Ticker"]),
-                "name": str(row["Company"]),
+                "name": str(row[name_col]),
                 "exchange": "Euronext Brussels",
                 "currency": "EUR",
                 "sector": row.get("Sector") or row.get("ICB Sector"),
