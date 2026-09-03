@@ -65,6 +65,19 @@ class YFinanceFundamentalsProvider(FundamentalsDataProvider):
         return yf.Ticker(ticker)
 
     def _current_market_cap(self, yf_ticker: yf.Ticker) -> float | None:
+        # `fast_info`'s marketCap is a known-unreliable computed field in
+        # yfinance (frequently None even when everything else on fast_info
+        # works fine, confirmed in production: 0/3420 fundamentals rows had
+        # a market_cap despite prices and estimates ingesting correctly).
+        # `.info` does a slower, full quoteSummary fetch but is the
+        # documented-reliable source for this field, so it's tried first.
+        try:
+            value = yf_ticker.info.get("marketCap")
+            if value is not None:
+                return float(value)
+        except Exception:
+            pass
+
         # yfinance's FastInfo has been inconsistent across versions about
         # whether it's addressed by snake_case attribute (`.market_cap`),
         # camelCase dict key (`["marketCap"]`), or snake_case dict key

@@ -64,6 +64,7 @@ def _mock_yf_fundamentals_ticker(mocker, income=None, balance=None, cashflow=Non
     mock_ticker.quarterly_income_stmt = income if income is not None else pd.DataFrame()
     mock_ticker.quarterly_balance_sheet = balance if balance is not None else pd.DataFrame()
     mock_ticker.quarterly_cashflow = cashflow if cashflow is not None else pd.DataFrame()
+    mock_ticker.info = {}
     mock_ticker.fast_info = {"market_cap": market_cap}
     mocker.patch(
         "stock_tracker.providers.yfinance_fundamentals_provider.yf.Ticker",
@@ -134,6 +135,7 @@ def test_yfinance_fundamentals_provider_market_cap_via_attribute(mocker):
     mock_ticker.quarterly_income_stmt = income
     mock_ticker.quarterly_balance_sheet = pd.DataFrame()
     mock_ticker.quarterly_cashflow = pd.DataFrame()
+    mock_ticker.info = {}
     mock_ticker.fast_info = _AttrFastInfo(7_000_000_000)
     mocker.patch(
         "stock_tracker.providers.yfinance_fundamentals_provider.yf.Ticker",
@@ -153,6 +155,7 @@ def test_yfinance_fundamentals_provider_market_cap_via_camelcase_key(mocker):
     mock_ticker.quarterly_income_stmt = income
     mock_ticker.quarterly_balance_sheet = pd.DataFrame()
     mock_ticker.quarterly_cashflow = pd.DataFrame()
+    mock_ticker.info = {}
     mock_ticker.fast_info = _CamelCaseDictFastInfo(marketCap=8_000_000_000)
     mocker.patch(
         "stock_tracker.providers.yfinance_fundamentals_provider.yf.Ticker",
@@ -172,6 +175,7 @@ def test_yfinance_fundamentals_provider_market_cap_falls_back_to_shares_times_pr
     mock_ticker.quarterly_income_stmt = income
     mock_ticker.quarterly_balance_sheet = pd.DataFrame()
     mock_ticker.quarterly_cashflow = pd.DataFrame()
+    mock_ticker.info = {}
     mock_ticker.fast_info = {"shares": 1000.0, "lastPrice": 50.0}
     mocker.patch(
         "stock_tracker.providers.yfinance_fundamentals_provider.yf.Ticker",
@@ -191,6 +195,7 @@ def test_yfinance_fundamentals_provider_market_cap_none_when_unavailable(mocker)
     mock_ticker.quarterly_income_stmt = income
     mock_ticker.quarterly_balance_sheet = pd.DataFrame()
     mock_ticker.quarterly_cashflow = pd.DataFrame()
+    mock_ticker.info = {}
     mock_ticker.fast_info = {}
     mocker.patch(
         "stock_tracker.providers.yfinance_fundamentals_provider.yf.Ticker",
@@ -201,6 +206,27 @@ def test_yfinance_fundamentals_provider_market_cap_none_when_unavailable(mocker)
     snapshots = provider.get_fundamentals("AAPL")
 
     assert snapshots[0].market_cap is None
+
+
+def test_yfinance_fundamentals_provider_market_cap_prefers_info_over_fast_info(mocker):
+    col = pd.Timestamp("2024-03-31")
+    income = pd.DataFrame({col: [1000.0]}, index=["Total Revenue"])
+    mock_ticker = mocker.MagicMock()
+    mock_ticker.quarterly_income_stmt = income
+    mock_ticker.quarterly_balance_sheet = pd.DataFrame()
+    mock_ticker.quarterly_cashflow = pd.DataFrame()
+    mock_ticker.info = {"marketCap": 9_000_000_000}
+    # fast_info has a different (stale/unreliable) value — .info should win.
+    mock_ticker.fast_info = {"market_cap": 1_000_000_000}
+    mocker.patch(
+        "stock_tracker.providers.yfinance_fundamentals_provider.yf.Ticker",
+        return_value=mock_ticker,
+    )
+
+    provider = YFinanceFundamentalsProvider()
+    snapshots = provider.get_fundamentals("AAPL")
+
+    assert snapshots[0].market_cap == 9_000_000_000
 
 
 def test_yfinance_fundamentals_provider_get_fundamentals_empty_returns_empty(mocker):
