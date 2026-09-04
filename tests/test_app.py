@@ -157,6 +157,35 @@ def test_load_signals_for_date(db):
     assert df.iloc[0]["Tranche"] == 2
 
 
+def test_load_signals_for_date_includes_week_change_pct(db):
+    _seed_ticker()
+    _seed_prices("AAPL", AS_OF, 10, baseline=100, today_close=84)
+    with get_session() as session:
+        session.add(
+            Signal(
+                ticker="AAPL", date=AS_OF, tranche=2, signal_type="ENTRY", price=84.0, sma50=99.0
+            )
+        )
+
+    df = app.load_signals_for_date(AS_OF)
+
+    assert df.iloc[0]["Verandering 1 week %"] == -16.0
+
+
+def test_load_signals_for_date_week_change_pct_none_without_history(db):
+    _seed_ticker()
+    with get_session() as session:
+        session.add(
+            Signal(
+                ticker="AAPL", date=AS_OF, tranche=2, signal_type="ENTRY", price=84.0, sma50=99.0
+            )
+        )
+
+    df = app.load_signals_for_date(AS_OF)
+
+    assert df.iloc[0]["Verandering 1 week %"] is None
+
+
 def test_load_signals_for_date_orders_deepest_tranche_first(db):
     _seed_ticker()
     with get_session() as session:

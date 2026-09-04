@@ -9,7 +9,7 @@ as `__main__`).
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import pandas as pd
 import streamlit as st
@@ -78,6 +78,28 @@ def latest_price_date() -> date | None:
     return row[0] if row else None
 
 
+def _price_change_pct(session, ticker: str, as_of: date, days_back: int) -> float | None:
+    """% change from the closest priced trading day at/before `as_of -
+    days_back` to `as_of`'s close. Point-in-time (only looks at data <=
+    as_of), consistent with the rest of the codebase."""
+
+    current = (
+        session.query(PriceDaily.close)
+        .filter(PriceDaily.ticker == ticker, PriceDaily.date == as_of)
+        .scalar()
+    )
+    past = (
+        session.query(PriceDaily.close)
+        .filter(PriceDaily.ticker == ticker, PriceDaily.date <= as_of - timedelta(days=days_back))
+        .order_by(PriceDaily.date.desc())
+        .limit(1)
+        .scalar()
+    )
+    if current is None or past is None or past == 0:
+        return None
+    return (current / past - 1) * 100
+
+
 def load_signals_for_date(as_of: date) -> pd.DataFrame:
     with get_session() as session:
         rows = (
@@ -87,21 +109,26 @@ def load_signals_for_date(as_of: date) -> pd.DataFrame:
             .all()
         )
         names_by_ticker = dict(session.query(Ticker.ticker, Ticker.name).all())
-    return pd.DataFrame(
-        [
-            {
-                "Ticker": r.ticker,
-                "Bedrijf": names_by_ticker.get(r.ticker, ""),
-                "Type": r.signal_type,
-                "Tranche": r.tranche,
-                "Prijs": r.price,
-                "SMA50": r.sma50,
-                "RSI14": r.rsi14,
-                "Notes": r.notes,
-            }
-            for r in rows
-        ]
-    )
+        return pd.DataFrame(
+            [
+                {
+                    "Ticker": r.ticker,
+                    "Bedrijf": names_by_ticker.get(r.ticker, ""),
+                    "Type": r.signal_type,
+                    "Tranche": r.tranche,
+                    "Prijs": r.price,
+                    "Verandering 1 week %": (
+                        round(pct, 2)
+                        if (pct := _price_change_pct(session, r.ticker, r.date, 7)) is not None
+                        else None
+                    ),
+                    "SMA50": r.sma50,
+                    "RSI14": r.rsi14,
+                    "Notes": r.notes,
+                }
+                for r in rows
+            ]
+        )
 
 
 def load_paper_portfolio() -> pd.DataFrame:
@@ -279,7 +306,8 @@ def main() -> None:
         st.caption(
             "Kleur geeft alleen aan hoe diep de dip is (tranche 3 = grootste koersval "
             "t.o.v. het 50-daags gemiddelde) — geen koopadvies, gewoon een leesbare "
-            "weergave van de mechanische regel."
+            "weergave van de mechanische regel. 'Verandering 1 week %' is het koersverschil "
+            "over de laatste 7 kalenderdagen t.o.v. de signaaldatum."
         )
         default_date = latest_signal_date() or date.today()
         as_of = st.date_input("Datum", value=default_date, key="signals_date")
