@@ -83,13 +83,15 @@ def load_signals_for_date(as_of: date) -> pd.DataFrame:
         rows = (
             session.query(SignalModel)
             .filter(SignalModel.date == as_of)
-            .order_by(SignalModel.signal_type, SignalModel.tranche)
+            .order_by(SignalModel.tranche.desc(), SignalModel.signal_type)
             .all()
         )
+        names_by_ticker = dict(session.query(Ticker.ticker, Ticker.name).all())
     return pd.DataFrame(
         [
             {
                 "Ticker": r.ticker,
+                "Bedrijf": names_by_ticker.get(r.ticker, ""),
                 "Type": r.signal_type,
                 "Tranche": r.tranche,
                 "Prijs": r.price,
@@ -274,13 +276,26 @@ def main() -> None:
 
     with tab_signals:
         st.subheader("Signalen")
+        st.caption(
+            "Kleur geeft alleen aan hoe diep de dip is (tranche 3 = grootste koersval "
+            "t.o.v. het 50-daags gemiddelde) — geen koopadvies, gewoon een leesbare "
+            "weergave van de mechanische regel."
+        )
         default_date = latest_signal_date() or date.today()
         as_of = st.date_input("Datum", value=default_date, key="signals_date")
         df = load_signals_for_date(as_of)
         if df.empty:
             st.info("Geen signalen voor deze datum.")
         else:
-            st.dataframe(df, width="stretch", hide_index=True)
+            tranche_colors = {
+                3: "background-color: #ff8a65; color: black",
+                2: "background-color: #ffd54f; color: black",
+                1: "background-color: #dce775; color: black",
+            }
+            styled = df.style.apply(
+                lambda row: [tranche_colors.get(row["Tranche"], "")] * len(row), axis=1
+            )
+            st.dataframe(styled, width="stretch", hide_index=True)
 
     with tab_portfolio:
         st.subheader("Open posities (paper)")
