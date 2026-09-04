@@ -16,9 +16,17 @@ import streamlit as st
 
 from stock_tracker import backtest, signals
 from stock_tracker.config import load_config
-from stock_tracker.db.models import EarningsCalendar, Journal, PriceDaily, Ticker, TradePaper
+from stock_tracker.db.models import (
+    EarningsCalendar,
+    Fundamentals,
+    Journal,
+    PriceDaily,
+    QualityScore,
+    Ticker,
+    TradePaper,
+)
 from stock_tracker.db.models import Signal as SignalModel
-from stock_tracker.db.session import get_session, init_db
+from stock_tracker.db.session import _resolve_db_path, get_session, init_db
 from stock_tracker.quality import get_eligible_tickers, get_eligible_tickers_with_grace
 
 # --- data loading (no Streamlit calls — importable/testable on their own) ----
@@ -236,6 +244,34 @@ def main() -> None:
 
     with get_session() as session:
         universe_size = session.query(Ticker).count()
+        fundamentals_count = session.query(Fundamentals).count()
+        fundamentals_with_market_cap = (
+            session.query(Fundamentals).filter(Fundamentals.market_cap.isnot(None)).count()
+        )
+        quality_scores_count = session.query(QualityScore).count()
+        quality_scores_max_date = session.query(QualityScore.date).order_by(
+            QualityScore.date.desc()
+        ).first()
+        eligible_count = session.query(QualityScore).filter(QualityScore.eligible.is_(True)).count()
+
+    db_path = _resolve_db_path(config)
+    diagnostics = {
+        "db_path (resolved)": str(db_path),
+        "db_path exists": db_path.exists(),
+        "db_path size (bytes)": db_path.stat().st_size if db_path.exists() else None,
+        "tickers": universe_size,
+        "fundamentals rows": fundamentals_count,
+        "fundamentals rows with market_cap": fundamentals_with_market_cap,
+        "quality_scores rows": quality_scores_count,
+        "quality_scores max date": (
+            str(quality_scores_max_date[0]) if quality_scores_max_date else None
+        ),
+        "quality_scores eligible=True (any date)": eligible_count,
+    }
+    print(f"[diagnostics] {diagnostics}")  # noqa: T201 -- shows up in Manage app logs
+    with st.expander("Diagnostiek (database-status)"):
+        st.json(diagnostics)
+
     if universe_size == 0:
         st.warning(
             "Universum is nog leeg — draai eerst `python -m stock_tracker.ingest --full`."
