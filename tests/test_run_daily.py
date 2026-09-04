@@ -3,7 +3,7 @@ from datetime import date
 import pytest
 
 from stock_tracker import run_daily
-from stock_tracker.db.models import Ticker, TradePaper
+from stock_tracker.db.models import PriceDaily, Ticker, TradePaper
 from stock_tracker.db.session import get_session
 from stock_tracker.signals import SignalResult
 
@@ -153,6 +153,66 @@ def test_run_sends_milestone_alert_on_crossing_threshold(db, mocker):
     assert result["milestone_sent"] is True
     assert mock_send.call_count == 1
     assert "Milestone" in mock_send.call_args.args[0]
+
+
+def test_run_defaults_as_of_to_latest_ingested_price_date(db, mocker):
+    with get_session() as session:
+        session.add(
+            Ticker(
+                ticker="AAPL", name="x", exchange="US", currency="EUR", index_membership="SP500"
+            )
+        )
+        session.add(
+            PriceDaily(
+                ticker="AAPL",
+                date=MONDAY,
+                open=100,
+                high=100,
+                low=100,
+                close=100,
+                volume=1,
+                close_eur=100,
+            )
+        )
+
+    mock_ingest = mocker.patch("stock_tracker.run_daily.ingest.run_daily")
+    mock_quality = mocker.patch("stock_tracker.run_daily.quality.run_for_date")
+    mock_entries = mocker.patch(
+        "stock_tracker.run_daily.signals.generate_entry_signals", return_value=[]
+    )
+    mocker.patch("stock_tracker.run_daily.signals.generate_exit_signals", return_value=[])
+    mocker.patch("stock_tracker.run_daily.signals.store_signals")
+    mocker.patch(
+        "stock_tracker.run_daily.paper.fill_pending_signals",
+        return_value={"opened": 0, "closed": 0},
+    )
+    mocker.patch("stock_tracker.run_daily.send_telegram_message")
+
+    result = run_daily.run(None, db)
+
+    # Not date.today() -- the latest price actually ingested, even though
+    # ingest.run_daily is mocked here and doesn't add any newer rows itself.
+    assert result["as_of"] == MONDAY
+    mock_ingest.assert_called_once_with(db)
+    mock_quality.assert_called_once_with(MONDAY, db)
+    mock_entries.assert_called_once_with(MONDAY, db)
+
+
+def test_run_falls_back_to_today_without_any_price_data(db, mocker):
+    mocker.patch("stock_tracker.run_daily.ingest.run_daily")
+    mocker.patch("stock_tracker.run_daily.quality.run_for_date")
+    mocker.patch("stock_tracker.run_daily.signals.generate_entry_signals", return_value=[])
+    mocker.patch("stock_tracker.run_daily.signals.generate_exit_signals", return_value=[])
+    mocker.patch("stock_tracker.run_daily.signals.store_signals")
+    mocker.patch(
+        "stock_tracker.run_daily.paper.fill_pending_signals",
+        return_value={"opened": 0, "closed": 0},
+    )
+    mocker.patch("stock_tracker.run_daily.send_telegram_message")
+
+    result = run_daily.run(None, db)
+
+    assert result["as_of"] == date.today()
 
 
 def test_main_dispatches_to_run(mocker):

@@ -422,6 +422,20 @@ def test_main_dispatches_to_run_for_date(mocker):
     mock_backfill.assert_not_called()
 
 
+def test_main_defaults_to_latest_price_date_not_today(db, mocker):
+    _seed_ticker()
+    price_date = date(2024, 5, 6)
+    _seed_prices("AAPL", price_date, 1, 1_000_000)
+    mocker.patch("stock_tracker.quality.load_config", return_value=db)
+    mocker.patch("stock_tracker.quality.setup_logging")
+    mocker.patch("stock_tracker.quality.init_db")
+    mock_run = mocker.patch("stock_tracker.quality.run_for_date")
+
+    quality.main([])
+
+    mock_run.assert_called_once_with(price_date, db)
+
+
 def test_main_dispatches_to_backfill(mocker):
     mock_config = mocker.MagicMock()
     mocker.patch("stock_tracker.quality.load_config", return_value=mock_config)
