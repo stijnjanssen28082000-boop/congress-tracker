@@ -29,7 +29,11 @@ from stock_tracker.db.models import (
 from stock_tracker.db.session import get_engine, get_session, init_db
 from stock_tracker.fx import convert_to_eur, fetch_fx_rates, store_fx_rates
 from stock_tracker.logging_setup import setup_logging
-from stock_tracker.providers.base import FundamentalsDataProvider, PriceDataProvider
+from stock_tracker.providers.base import (
+    EstimateSnapshot,
+    FundamentalsDataProvider,
+    PriceDataProvider,
+)
 from stock_tracker.providers.fmp_provider import FMPProvider
 from stock_tracker.providers.yfinance_fundamentals_provider import YFinanceFundamentalsProvider
 from stock_tracker.providers.yfinance_provider import YFinanceProvider
@@ -210,12 +214,24 @@ def _build_fundamentals_provider(config: Config) -> FundamentalsDataProvider | N
 
 
 def _refresh_fundamentals(
-    ticker: str, provider: FundamentalsDataProvider, full: bool, source: str
+    ticker: str, provider: FundamentalsDataProvider, full: bool, source: str, as_of: date
 ) -> None:
     try:
         if full:
             _store_fundamentals(ticker, provider.get_fundamentals(ticker), source)
-        _store_estimates(ticker, provider.get_estimates(ticker), source)
+        # Providers stamp estimates with the moment they were fetched
+        # (date.today()), but ingest always fetches prices only through
+        # yesterday (today's session may not have closed yet). Re-stamp
+        # with the same reference date prices use, so a later point-in-time
+        # query "as of <that date>" doesn't see estimates as being from the
+        # future relative to the price data fetched in this same run.
+        estimates = [
+            EstimateSnapshot(
+                as_of_date=as_of, fiscal_year=e.fiscal_year, eps_estimate=e.eps_estimate
+            )
+            for e in provider.get_estimates(ticker)
+        ]
+        _store_estimates(ticker, estimates, source)
         _store_earnings(ticker, provider.get_earnings_calendar(ticker), source)
     except Exception:
         logger.exception("Fundamentals ingest failed for %s", ticker)
@@ -279,6 +295,7 @@ def run_full(config: Config) -> None:
                 fundamentals_provider,
                 full=True,
                 source=config.ingest.fundamentals_provider,
+                as_of=end,
             )
 
     prune_result = prune_old_prices(config)
@@ -324,6 +341,7 @@ def run_daily(config: Config) -> None:
                 fundamentals_provider,
                 full=False,
                 source=config.ingest.fundamentals_provider,
+                as_of=end,
             )
 
 

@@ -263,11 +263,29 @@ def test_run_full_stores_configured_provider_as_source(db, mocker):
 
     ingest.run_full(db)
 
+    expected_as_of = date.today() - timedelta(days=1)
     with get_session() as session:
         estimate = session.query(AnalystEstimate).filter_by(ticker="AAPL").one()
         earnings = session.query(EarningsCalendar).filter_by(ticker="AAPL").one()
         assert estimate.source == "yfinance"
         assert earnings.source == "yfinance"
+        # Re-stamped to match the price range's reference date, not
+        # whatever date.today() the provider itself used when fetching.
+        assert estimate.as_of_date == expected_as_of
+
+
+def test_refresh_fundamentals_restamps_estimates_to_as_of_not_providers_own_date(db):
+    _seed_ticker()
+    fake_fundamentals = FakeFundamentalsProvider()
+    stale_as_of = date(2020, 1, 1)  # deliberately not date.today(), unlike the provider's stamp
+
+    ingest._refresh_fundamentals(
+        "AAPL", fake_fundamentals, full=False, source="yfinance", as_of=stale_as_of
+    )
+
+    with get_session() as session:
+        estimate = session.query(AnalystEstimate).filter_by(ticker="AAPL").one()
+        assert estimate.as_of_date == stale_as_of
 
 
 def test_prune_old_prices_deletes_old_rows_keeps_recent(db):
