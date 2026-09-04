@@ -272,3 +272,13 @@ def test_latest_signal_date_returns_most_recent(db):
 
 def test_latest_signal_date_none_when_empty(db):
     assert app.latest_signal_date() is None
+
+
+def test_latest_price_date_returns_most_recent(db):
+    _seed_ticker()
+    _seed_prices("AAPL", AS_OF, 5, baseline=100, today_close=100)
+    assert app.latest_price_date() == AS_OF
+
+
+def test_latest_price_date_none_when_empty(db):
+    assert app.latest_price_date() is None

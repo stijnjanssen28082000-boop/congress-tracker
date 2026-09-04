@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 from stock_tracker import ingest, paper, quality, signals
 from stock_tracker.alerts import format_daily_alert, format_milestone_alert, send_telegram_message
 from stock_tracker.config import Config, load_config
-from stock_tracker.db.models import TradePaper
+from stock_tracker.db.models import PriceDaily, TradePaper
 from stock_tracker.db.session import get_session, init_db
 from stock_tracker.logging_setup import setup_logging
 
@@ -32,13 +32,28 @@ def _count_closed_trades() -> int:
         return session.query(TradePaper).filter(TradePaper.status == "CLOSED").count()
 
 
+def _latest_price_date() -> date | None:
+    with get_session() as session:
+        row = session.query(PriceDaily.date).order_by(PriceDaily.date.desc()).first()
+    return row[0] if row else None
+
+
 def run(as_of: date | None = None, config: Config | None = None) -> dict:
     config = config or load_config()
-    as_of = as_of or date.today()
-
-    logger.info("=== Daily run for %s ===", as_of)
+    explicit_as_of = as_of
 
     ingest.run_daily(config)
+
+    # ingest.run_daily only ever fetches prices through yesterday (it never
+    # assumes today's session has closed yet), so `compute_indicators`'s
+    # exact-date price match would never succeed for calendar "today" --
+    # every entry/exit/quality computation would silently find nothing,
+    # forever. Default to the latest date actually ingested instead; an
+    # explicit `as_of` (e.g. from --date, for backfill/testing) is honored
+    # as-is.
+    as_of = explicit_as_of or _latest_price_date() or date.today()
+
+    logger.info("=== Daily run for %s ===", as_of)
 
     if _is_quality_day(as_of, config):
         logger.info("%s is the configured quality-recompute day", config.quality.recompute_weekday)

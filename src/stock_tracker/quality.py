@@ -332,13 +332,19 @@ def backfill(start: date, end: date, config: Config | None = None) -> int:
     return total
 
 
+def _latest_price_date() -> date | None:
+    with get_session() as session:
+        row = session.query(PriceDaily.date).order_by(PriceDaily.date.desc()).first()
+    return row[0] if row else None
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="stock-tracker quality filter")
     parser.add_argument(
         "--date",
         type=date.fromisoformat,
         default=None,
-        help="Compute for this date (default: today)",
+        help="Compute for this date (default: latest ingested price date, else today)",
     )
     parser.add_argument("--backfill-start", type=date.fromisoformat, default=None)
     parser.add_argument("--backfill-end", type=date.fromisoformat, default=None)
@@ -354,7 +360,13 @@ def main(argv: list[str] | None = None) -> None:
     if args.backfill_start and args.backfill_end:
         backfill(args.backfill_start, args.backfill_end, config)
     else:
-        run_for_date(args.date or date.today(), config)
+        # ingest.py never fetches today's own price (it assumes today's
+        # session may not have closed yet), so defaulting to date.today()
+        # here would compute quality one day ahead of the price data it's
+        # actually filtered against -- e.g. compute_indicators() would then
+        # never find an exact-date match for it downstream.
+        as_of = args.date or _latest_price_date() or date.today()
+        run_for_date(as_of, config)
 
 
 if __name__ == "__main__":
