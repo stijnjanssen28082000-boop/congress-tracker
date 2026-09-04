@@ -153,7 +153,27 @@ def test_load_signals_for_date(db):
 
     assert len(df) == 1
     assert df.iloc[0]["Ticker"] == "AAPL"
+    assert df.iloc[0]["Bedrijf"] == "Test Co"
     assert df.iloc[0]["Tranche"] == 2
+
+
+def test_load_signals_for_date_orders_deepest_tranche_first(db):
+    _seed_ticker()
+    with get_session() as session:
+        session.add(
+            Signal(
+                ticker="AAPL", date=AS_OF, tranche=1, signal_type="ENTRY", price=90.0, sma50=99.0
+            )
+        )
+        session.add(
+            Signal(
+                ticker="AAPL", date=AS_OF, tranche=3, signal_type="ENTRY", price=70.0, sma50=99.0
+            )
+        )
+
+    df = app.load_signals_for_date(AS_OF)
+
+    assert list(df["Tranche"]) == [3, 1]
 
 
 def test_load_paper_portfolio_computes_unrealized_and_flags(db):
