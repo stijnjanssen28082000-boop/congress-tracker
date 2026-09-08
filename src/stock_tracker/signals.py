@@ -34,6 +34,7 @@ EXIT_FUNDAMENTAL = "EXIT_FUNDAMENTAL"
 class PriceIndicators:
     date: date
     close: float
+    close_eur: float
     sma50: float | None
     rsi14: float | None
     high_52w: float | None
@@ -106,6 +107,7 @@ def compute_indicators(session, ticker: str, as_of: date, config: Config) -> Pri
     return PriceIndicators(
         date=as_of,
         close=today_close,
+        close_eur=rows[-1].close_eur,
         sma50=sma(closes, sma_period),
         rsi14=rsi(closes, rsi_period),
         high_52w=high_52w,
@@ -214,7 +216,13 @@ def generate_exit_signals(as_of: date, config: Config | None = None) -> list[Sig
             if indicators is None:
                 continue
 
-            return_pct = (indicators.close / trade.entry_price - 1) * 100
+            # trade.entry_price is EUR (paper trading is booked in EUR
+            # throughout -- see paper.py), so the return must be computed in
+            # EUR too. indicators.close is native currency and would mix
+            # units for any non-EUR ticker, inflating or deflating the
+            # apparent return by the FX rate instead of measuring the real
+            # price move.
+            return_pct = (indicators.close_eur / trade.entry_price - 1) * 100
             hit_profit_target = return_pct >= exit_cfg.profit_target_pct
             closed_above_sma = indicators.sma50 is not None and indicators.close > indicators.sma50
 

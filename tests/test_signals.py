@@ -70,6 +70,32 @@ def _seed_flat(ticker, as_of, num_days, price, volume=1_000_000):
     _seed_prices(ticker, as_of, num_days, price, price, volume)
 
 
+def _seed_prices_fx(
+    ticker, as_of, num_days, baseline, today_close, today_close_eur, volume=1_000_000
+):
+    """Like _seed_prices, but with a native `today_close` that differs from
+    its EUR-converted value on `as_of` — for testing that EUR-booked paper
+    trades are compared against close_eur, not the native close."""
+
+    with get_session() as session:
+        for i in range(num_days):
+            d = as_of - timedelta(days=num_days - 1 - i)
+            close = today_close if d == as_of else baseline
+            close_eur = today_close_eur if d == as_of else baseline
+            session.add(
+                PriceDaily(
+                    ticker=ticker,
+                    date=d,
+                    open=close,
+                    high=close,
+                    low=close,
+                    close=close,
+                    volume=volume,
+                    close_eur=close_eur,
+                )
+            )
+
+
 def _seed_earnings(ticker, earnings_date, confirmed=True):
     with get_session() as session:
         session.add(
@@ -239,6 +265,44 @@ def test_exit_on_profit_target(db):
     assert len(exits) == 1
     assert exits[0].notes == "profit_target"
     assert exits[0].tranche == 1
+
+
+def test_profit_target_return_uses_eur_close_not_native_close(db):
+    """Paper trades are booked in EUR (entry_price is EUR), but a US ticker's
+    indicators are computed on its native USD close. Comparing them directly
+    would mix currencies: a native close far above the EUR entry_price could
+    look like a huge profit that isn't real once converted to EUR."""
+
+    _seed_ticker("APP", currency="USD")
+    _seed_eligible("APP", AS_OF, True)
+    # Native close (320) is more than 3x the EUR entry_price (90) -- if the
+    # exit check used indicators.close instead of indicators.close_eur, this
+    # would look like a >200% gain and wrongly fire a profit_target exit.
+    # The real EUR return (95 vs 90 = +5.6%) stays under the 10% threshold.
+    _seed_prices_fx("APP", AS_OF, 60, baseline=90, today_close=320, today_close_eur=95)
+    _seed_trade("APP", tranche=2, entry_date=AS_OF - timedelta(weeks=1), entry_price=90)
+
+    results = signals.generate_exit_signals(AS_OF, db)
+
+    exits = [r for r in results if r.signal_type == signals.EXIT and r.notes == "profit_target"]
+    assert exits == []
+
+
+def test_profit_target_fires_on_real_eur_gain(db):
+    _seed_ticker("APP", currency="USD")
+    _seed_eligible("APP", AS_OF, True)
+    # Native close (91) barely moved from the baseline (90) -- if the exit
+    # check used indicators.close instead of indicators.close_eur, this
+    # ~1% native move wouldn't cross the 10% profit target. The EUR close
+    # (100) is the one that actually crosses it over the entry_price of 90.
+    _seed_prices_fx("APP", AS_OF, 60, baseline=90, today_close=91, today_close_eur=100)
+    _seed_trade("APP", tranche=2, entry_date=AS_OF - timedelta(weeks=1), entry_price=90)
+
+    results = signals.generate_exit_signals(AS_OF, db)
+
+    exits = [r for r in results if r.signal_type == signals.EXIT and r.notes == "profit_target"]
+    assert len(exits) == 1
+    assert exits[0].ticker == "APP"
 
 
 def test_exit_on_close_above_sma50(db):
