@@ -2,10 +2,15 @@ name: Daily run
 
 on:
   schedule:
-    # 06:00 UTC on weekdays ≈ 07:00 CET / 08:00 CEST — cron can't express CET
-    # with DST, so this drifts by an hour in summer. Adjust the "6" below
-    # seasonally if the exact wall-clock time matters.
-    - cron: "0 6 * * 1-5"
+    # 07:00 Belgian time on weekdays. Cron only understands UTC and can't
+    # express DST transitions (they fall on the last Sunday of March/October,
+    # not a month boundary), so this approximates it with two entries that
+    # switch UTC offset by calendar month. Exact for every week of the year
+    # except a ~1-week window right after DST ends in late October, when
+    # this still fires at 08:00 local time (CET) for a few days until the
+    # November entry takes over.
+    - cron: "0 5 * 4-10 1-5" # CEST (UTC+2), April-October
+    - cron: "0 6 * 11,12,1,2,3 1-5" # CET (UTC+1), November-March
   workflow_dispatch: {}
 
 permissions:
